@@ -1,0 +1,24 @@
+# Container overlay for `dsh web` (applied via `--patch`, keeps $DSH_HOME clean).
+#
+# 1. Bind all interfaces INSIDE the container. The CLI refuses `--host 0.0.0.0`
+#    on purpose (it has no TLS/auth of its own), but the webserver plugin does
+#    accept it as a config value. The container network is private; the only
+#    public path is Caddy (TLS + basic auth) -> dsh:3080, and the /api
+#    browser-trust fence still requires the Host header to be listed via
+#    `--trusted-host` (see entrypoint.sh). NOTE: a patch replaces the whole
+#    `config` of the row, so the port is a literal here and `--port` is ignored.
+- id: webserver
+  config:
+    host: 0.0.0.0
+    port: 3080
+    compression: gzip
+    compressionLevel: 1
+    compressionThresholdBytes: 1024
+
+# 2. Do not ship session logs to DeepSeek as "feedback" alongside API requests
+#    (the base bundle enables this contributor by default). Model requests
+#    themselves are unaffected. OTel telemetry is disabled via
+#    DSH_TELEMETRY_MODE=DISABLED in the image.
+- id: session-log-deepseek
+  config:
+    enabled: false
