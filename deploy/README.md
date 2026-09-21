@@ -19,6 +19,7 @@ clone it and pull updates.
 | `login-link.sh` | Prints the one-time `?token=` URL after a (re)start. |
 | `model.sh` | Configure a model without the Settings UI: `key` (stdin → `.env` → redeploy), `default <provider> <model>`, `show`. |
 | `tunnel.sh` | Prints the SSH port-forward that makes the page loopback, where the full Settings UI works. |
+| `telegram.sh` | Wires the Telegram broadcast: `token`, `discover`, `use <chat_id>`, `test`, `show`. |
 | `update.sh` | `git pull` → rebuild → reinstall bundles → restart → tests → login link. |
 | `publish.sh` | Push `main` + tags to GitHub (`origin`) and to the local mirror (`/srv/git`). |
 | `sync-upstream.sh` | Merge `upstream/master` (or a release tag) into `main`. |
@@ -32,6 +33,7 @@ clone it and pull updates.
 | `dsh-ext-compaction-pro` | Compaction engine: structured checkpoint with verbatim user directives + touched-files/commands ledger, MAX_TOKENS retry, map-reduce for over-long spans. | used by the `pro` preset (`$DSH_HOME/.agent-presets/pro`) |
 | `dsh-ext-workspace-picker` | Directory dialog that opens in the workspace, keeps Home anchored there, dims caches/build output, and can show configured `places` as jump rows. Replaces the `directory-picker` row with the browse backend + client surface pair. | its row's `config` in the bundle patch (`defaultPath`, `homeAnchor`, `noise`, `places`) |
 | `dsh-ext-version` | `/version` command and a system-prompt line naming the running build. | `deploy/build-info.json`, baked into the image |
+| `dsh-ext-telegram` | Mirrors every session into Telegram as its own topic: ask, answer, tool lines, approvals, errors, completion ping. `/tg` tests it. | `deploy/telegram.sh`, then its row's `config` (`mode`, `tools`, `minRunSeconds`) |
 | `dsh-ext-about` | An `i` button opening a panel: fork version, upstream base, installed extensions, and the release history parsed from `CHANGELOG.md` (baked into the image). | `enabled`, `maxReleases` in its bundle patch |
 | `dsh-ext-efficiency` | Replaces byte-identical repeats of the same tool call with a one-line hash pointer, keeps prefix-cache accounting, and adds `/context` (window occupancy, distance to compaction, cache-hit ratio, dedup savings). | its row's `config` (`minChars`, `minSavingChars`, `excludeTools`) |
 | `dsh-ext-remote-console` | Declares this deployment's authenticated page an operator console, so the Settings pages persist to the harness home over the public URL instead of the browser tab. Ships off; this deployment's patch turns it on. | `enabled` in its bundle patch |

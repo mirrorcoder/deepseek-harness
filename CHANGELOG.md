@@ -12,6 +12,23 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.6.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Telegram broadcast** (`dsh-ext-telegram`). Every session is mirrored into
+  Telegram as its own topic — Telegram lets a bot open topics inside a private
+  chat, so the target can be the operator's own chat with the bot, and a forum
+  supergroup behaves the same. The thread carries the ask, the answer, a
+  one-line trace of each tool call, anything the agent is blocked on, errors,
+  and a completion ping with duration and token usage for runs past a
+  threshold. A chat without topics falls back to plain prefixed messages.
+  The outbox is serial, rate-limited and bounded, and every failure is reported
+  rather than raised, so a broadcast problem can never fail a turn. `/tg` sends
+  a test line and reports the outbox state.
+- `deploy/telegram.sh` wires it: `token` (from stdin), `discover` (which chats
+  have written to the bot), `use <chat_id>`, `test`, `show`.
+
 ## v1.5.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-telegram",
+  "version": "0.1.0",
+  "description": "Live broadcast of every session into Telegram: one topic per session, tool lines, approvals, errors and completion pings",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "telegram.js", "format.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}

@@ -1,0 +1,10 @@
+# Off until a chat is configured: run deploy/telegram.sh, which discovers the
+# chat id, stores the bot token in deploy/.env and flips `enabled` here.
+- insert:
+    - id: ext-telegram
+      name: dsh-ext-telegram
+      config:
+        enabled: !!js (process.env.TELEGRAM_BOT_TOKEN ?? '') !== '' && (process.env.TELEGRAM_CHAT_ID ?? '') !== ''
+        chatId: !!js process.env.TELEGRAM_CHAT_ID ?? ''
+        mode: stream
+        tools: compact
