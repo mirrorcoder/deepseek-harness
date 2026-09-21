@@ -11,6 +11,9 @@ services:
       dockerfile: deploy/Dockerfile
       args:
         DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.2}
+        FORK_VERSION: ${FORK_VERSION:-local}
+        FORK_COMMIT: ${FORK_COMMIT:-unknown}
+        BUILD_DATE: ${BUILD_DATE:-unknown}
     # tagged with OUR fork version (see VERSION / deploy/release.sh), not upstream's
     image: deepseek-harness:${FORK_VERSION:-local}
     container_name: dsh

@@ -10,7 +10,9 @@ if [ "${1:-}" != "--no-pull" ]; then
 fi
 # Image tag and the baked stamp both follow our own VERSION file.
 FORK_VERSION="$(tr -d ' \n\r' < ../VERSION)"
-export FORK_VERSION
+FORK_COMMIT="$(git -C .. rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export FORK_VERSION FORK_COMMIT BUILD_DATE
 ./gen-build-info.sh
 docker compose build --pull dsh
 docker compose up -d --remove-orphans

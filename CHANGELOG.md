@@ -12,6 +12,17 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.0.1 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- `/version` reported a commit hash that exists in no branch: the stamp was
+  written, committed, then folded into an amended commit, so it named the
+  pre-amend object. The commit and build timestamp now travel as build args
+  into the image environment and OCI labels; `build-info.json` keeps only the
+  facts a commit can carry about itself. `dsh-ext-version` merges the two and
+  lets the environment win over a stale value in the file.
+
 ## v1.0.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

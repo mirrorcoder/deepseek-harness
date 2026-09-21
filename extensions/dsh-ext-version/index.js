@@ -21,20 +21,30 @@ const UNKNOWN = {
   forkCommit: 'unknown',
   upstreamBase: 'unknown',
   upstreamNpm: 'unknown',
+  releasedAt: 'unknown',
   builtAt: 'unknown',
   repository: '',
   mirror: '',
   extensions: {},
 }
 
-/** Read and normalise the stamp; never throws — a missing file yields "unknown". */
-export function readBuildInfo(path, read = readFileSync) {
+/**
+ * Read and normalise the stamp; never throws — a missing file yields "unknown".
+ * The commit and build timestamp come from the image environment because a
+ * committed file cannot name the commit that contains it.
+ */
+export function readBuildInfo(path, read = readFileSync, env = process.env) {
+  let parsed = {}
   try {
-    const parsed = JSON.parse(read(path, 'utf8'))
-    return { ...UNKNOWN, ...parsed, extensions: parsed.extensions ?? {} }
+    parsed = JSON.parse(read(path, 'utf8'))
   } catch {
-    return { ...UNKNOWN }
+    parsed = {}
   }
+  const fromEnv = {
+    ...(env.DSH_FORK_COMMIT ? { forkCommit: env.DSH_FORK_COMMIT } : {}),
+    ...(env.DSH_BUILT_AT ? { builtAt: env.DSH_BUILT_AT } : {}),
+  }
+  return { ...UNKNOWN, ...parsed, ...fromEnv, extensions: parsed.extensions ?? {} }
 }
 
 /** One-line identity, e.g. "dsh fork v1.0.0 (a1b2c3d) on upstream dsh-v0.1.5-rc.2". */
@@ -45,7 +55,7 @@ export function shortLine(info) {
 export function report(info) {
   const exts = Object.entries(info.extensions)
   const lines = [
-    `Fork version:   v${info.forkVersion}  (commit ${info.forkCommit}, built ${info.builtAt})`,
+    `Fork version:   v${info.forkVersion}  (released ${info.releasedAt}, commit ${info.forkCommit}, built ${info.builtAt})`,
     `Upstream base:  ${info.upstreamBase}${info.upstreamNpm && info.upstreamNpm !== 'unknown' ? ` (npm @deepseek-ai/dsh@${info.upstreamNpm})` : ''}`,
   ]
   if (info.repository) lines.push(`Source:         ${info.repository}`)

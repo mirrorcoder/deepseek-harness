@@ -18,8 +18,15 @@ RUN npm install -g --no-audit --no-fund \
 
 FROM node:22-bookworm-slim
 ARG DSH_VERSION
+# Identity of THIS fork build: the two facts a committed file cannot carry.
+ARG FORK_VERSION=local
+ARG FORK_COMMIT=unknown
+ARG BUILD_DATE=unknown
 LABEL org.opencontainers.image.title="deepseek-harness" \
-      org.opencontainers.image.version="${DSH_VERSION}" \
+      org.opencontainers.image.version="${FORK_VERSION}" \
+      org.opencontainers.image.revision="${FORK_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.base.name="@deepseek-ai/dsh@${DSH_VERSION}" \
       org.opencontainers.image.source="https://github.com/mirrorcoder/deepseek-harness"
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates curl ripgrep procps tini openssh-client jq \
@@ -49,7 +56,9 @@ RUN chmod +x /opt/dsh/entrypoint.sh /opt/dsh/install-extensions.sh \
 ENV DSH_HOME=/data/dsh \
     HOME=/data \
     DSH_TELEMETRY_MODE=DISABLED \
-    NODE_ENV=production
+    NODE_ENV=production \
+    DSH_FORK_COMMIT=${FORK_COMMIT} \
+    DSH_BUILT_AT=${BUILD_DATE}
 USER node
 WORKDIR /workspace
 EXPOSE 3080

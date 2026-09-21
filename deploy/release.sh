@@ -39,9 +39,6 @@ else
   ./deploy/gen-build-info.sh >/dev/null
   git add VERSION CHANGELOG.md deploy/build-info.json deploy extensions
   git commit -q -m "release: v$next"
-  # the sha is only known after the commit, so stamp it and fold it in
-  ./deploy/gen-build-info.sh >/dev/null
-  git add deploy/build-info.json && git commit -q --amend --no-edit
   git tag -a "v$next" -m "v$next"
   echo "→ committed and tagged v$next"
 fi
@@ -50,9 +47,13 @@ echo "→ publishing"
 ./deploy/publish.sh
 
 echo "→ building image deepseek-harness:$next"
+FORK_VERSION="$next"
+FORK_COMMIT="$(git rev-parse --short=10 HEAD)"
+BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+export FORK_VERSION FORK_COMMIT BUILD_DATE
 cd "$ROOT/deploy"
-FORK_VERSION="$next" docker compose build dsh
-FORK_VERSION="$next" docker compose up -d --remove-orphans
+docker compose build dsh
+docker compose up -d --remove-orphans
 i=0; while [ $i -lt 60 ]; do docker logs --since 120s dsh 2>&1 | grep -q 'token=' && break; i=$((i+1)); sleep 2; done
 docker exec dsh /opt/dsh/install-extensions.sh
 for d in skills/*/; do

@@ -1,14 +1,17 @@
 #!/bin/sh
 # Write deploy/build-info.json from the repository's current state. Committed
 # with each release so any clone builds an image that knows what it is.
-# Usage: deploy/gen-build-info.sh [git-sha]   (sha defaults to current HEAD)
+#
+# Deliberately NOT recorded here: the commit sha and the build timestamp. A
+# file that is part of the commit cannot name that commit (amending changes the
+# sha), so those two travel as build args and land in the image environment;
+# dsh-ext-version merges them over this file.
 set -eu
 cd "$(dirname "$0")/.."
 VERSION="$(tr -d ' \n\r' < VERSION)"
-SHA="${1:-$(git rev-parse --short=10 HEAD 2>/dev/null || echo unknown)}"
 UPSTREAM="$(git describe --tags --match 'dsh-v*' --abbrev=0 2>/dev/null || echo unknown)"
 DSH_NPM="$(sed -n 's/^DSH_VERSION=\([^ #]*\).*/\1/p' deploy/.env.example | head -1)"
-DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+RELEASED="$(date -u +%Y-%m-%d)"
 
 exts=""
 for d in extensions/*/; do
@@ -22,14 +25,13 @@ exts="${exts%,}"
 cat > deploy/build-info.json <<EOF
 {
   "forkVersion": "$VERSION",
-  "forkCommit": "$SHA",
   "upstreamBase": "$UPSTREAM",
   "upstreamNpm": "$DSH_NPM",
-  "builtAt": "$DATE",
+  "releasedAt": "$RELEASED",
   "repository": "https://github.com/mirrorcoder/deepseek-harness",
   "mirror": "https://ds.jusl.me/git/deepseek-harness.git",
   "extensions": {$exts
   }
 }
 EOF
-echo "deploy/build-info.json → v$VERSION ($SHA, base $UPSTREAM)"
+echo "deploy/build-info.json → v$VERSION (base $UPSTREAM, released $RELEASED)"
