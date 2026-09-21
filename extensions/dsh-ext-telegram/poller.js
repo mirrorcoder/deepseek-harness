@@ -39,6 +39,8 @@ export class UpdatePoller {
     this.onMessage = o.onMessage
     this.timeout = o.timeout ?? 25
     this.onError = o.onError ?? (() => {})
+    /** Called after a round that reached Telegram, so a stale failure can clear. */
+    this.onOk = o.onOk ?? (() => {})
     this.sleep = o.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     this.offset = undefined
     this.stopped = false
@@ -54,6 +56,7 @@ export class UpdatePoller {
       allowed_updates: ['message', 'my_chat_member'],
     })
     this.rounds++
+    this.onOk()
     for (const update of Array.isArray(updates) ? updates : []) {
       if (typeof update.update_id === 'number') this.offset = update.update_id + 1
       const chat = chatOf(update)

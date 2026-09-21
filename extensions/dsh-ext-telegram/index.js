@@ -279,6 +279,9 @@ export function apply(ctx, initial) {
             }
           },
           onError: note,
+          // A failure from the boot race (credentials not loaded yet) must not
+          // sit in the panel forever once polling actually works.
+          onOk: () => { lastError = undefined },
         })
         pollers.set(ref, { poller, chats, destinationId })
         void poller.run()
