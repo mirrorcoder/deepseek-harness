@@ -28,6 +28,8 @@ clone it and pull updates.
 | `dsh-ext-image-gen` | `generate_image` tool: PNGs from the native image model via the host gateway (Codex/ChatGPT subscription session, no API key). Files land in `<workspace>/generated-images/` and are shown inline. | env `DSH_IMAGE_GATEWAY_TOKEN` (.env), socket `/run/imggw/gateway.sock` from `dsh-imggw-bridge` |
 | `dsh-ext-peak-guard` | Cost-weighted tokens-per-minute budget; stricter in DeepSeek peak hours (01–04, 06–10 UTC Mon–Fri, minus CN holidays). Warns the model in the system prompt at 70 %, declines calls over budget with `PEAK_GUARD`. `/peak` command. | `settings.yaml` → `peak-guard:` (live) |
 | `dsh-ext-compaction-pro` | Compaction engine: structured checkpoint with verbatim user directives + touched-files/commands ledger, MAX_TOKENS retry, map-reduce for over-long spans. | used by the `pro` preset (`$DSH_HOME/.agent-presets/pro`) |
+| `dsh-ext-workspace-picker` | Directory dialog that opens in the workspace, keeps Home anchored there, dims caches/build output, and can show configured `places` as jump rows. Replaces the `directory-picker` row with the browse backend + client surface pair. | its row's `config` in the bundle patch (`defaultPath`, `homeAnchor`, `noise`, `places`) |
+| `dsh-ext-version` | `/version` command and a system-prompt line naming the running build. | `deploy/build-info.json`, baked into the image |
 
 Each package has a `test.mjs` runnable inside the container with `node --test`
 from `/data/dsh/profiles/web/node_modules/<pkg>/` (deps resolve from the

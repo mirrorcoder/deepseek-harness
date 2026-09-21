@@ -12,6 +12,23 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.1.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Workspace picker** (`dsh-ext-workspace-picker`): the "Select Workspace
+  Directory" dialog now opens in the workspace root instead of the account's
+  home directory, keeps its breadcrumb Home anchored there while you browse,
+  and flags package caches, build output and VCS internals hidden so the level
+  shows real project directories first. Configured `places` add jump rows to
+  the first level. It replaces the adaptive chooser row with the browse pair
+  the seam documents as its swap point; breadcrumbs, "New folder", truncation
+  and symlink handling stay upstream's.
+- `/workspace/projects` is created as an obvious home for new work.
+- `deploy/update.sh` now restarts the same way `release.sh` does, by letting
+  the process exit into the restart policy, since bundle membership is only
+  read at boot.
+
 ## v1.0.1 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

@@ -1,0 +1,16 @@
+{
+  "name": "dsh-ext-workspace-picker",
+  "version": "0.1.0",
+  "description": "Directory picker that opens in the workspace, anchors Home there, hides build/vendor noise and offers configured places",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "policy.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-host-directory-picker": "*",
+    "@deepseek-ai/dsh-host-directory-picker-browse": "*"
+  }
+}

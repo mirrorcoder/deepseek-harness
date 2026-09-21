@@ -14,7 +14,7 @@ EXT_DIR="${EXT_DIR:-/opt/dsh/extensions}"
 PROFILE="$DSH_HOME/profiles/web"
 
 echo "→ installing extensions into $PROFILE"
-for ext in dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro; do
+for ext in dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro dsh-ext-workspace-picker; do
   [ -d "$EXT_DIR/$ext" ] || { echo "!! missing $EXT_DIR/$ext" >&2; exit 1; }
   # pnpm treats a `file:` directory with an unchanged version as up to date and
   # keeps the stale copy — remove first so the new image's code really lands.

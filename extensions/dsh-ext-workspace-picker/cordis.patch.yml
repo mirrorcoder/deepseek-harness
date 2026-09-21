@@ -1,0 +1,17 @@
+# Swap the directory-picker pair: the seam mounts exactly one backend plus its
+# client surface, so the adaptive chooser goes and we compose the same browse
+# surface next to our own backend. (The chooser resolves to `browse` here
+# anyway: the container binds all interfaces and has no display.)
+- id: directory-picker
+  disabled: true
+
+- insert:
+    - id: ext-workspace-picker
+      name: dsh-ext-workspace-picker
+      config:
+        # empty = the process working directory, i.e. the workspace root
+        defaultPath: ''
+        homeAnchor: ''
+        places: []
+    - id: ext-workspace-picker-ui
+      name: '@deepseek-ai/dsh-client-ui-directory-picker-browse'

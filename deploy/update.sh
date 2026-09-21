@@ -30,13 +30,15 @@ for d in skills/*/; do
   docker exec dsh sh -c "[ -e /data/dsh/skills/$n/SKILL.md ]" 2>/dev/null \
     || docker cp "$d" "dsh:/data/dsh/skills/$n"
 done
-docker compose restart dsh
+# A clean exit lets the restart policy boot the process with the new bundles;
+# bundle membership is only read at boot.
+docker exec dsh kill -TERM 1 || true
 echo "→ waiting for dsh after restart…"
 i=0; while [ $i -lt 60 ]; do
   if docker logs --since 60s dsh 2>&1 | grep -q 'token='; then break; fi
   i=$((i+1)); sleep 2
 done
 echo "→ extension tests"
-docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro; do printf "   %-26s " "$p"; node --test "$p/test.mjs" 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
+docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker; do printf "   %-26s " "$p"; node --test "$p/test.mjs" 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
 echo "→ running build: $(docker exec dsh sh -c 'cat /opt/dsh/build-info.json' | tr -d "\n ")"
 ./login-link.sh
