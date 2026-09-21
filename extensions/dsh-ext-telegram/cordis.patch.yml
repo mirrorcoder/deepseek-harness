@@ -1,10 +1,9 @@
-# Off until a chat is configured: run deploy/telegram.sh, which discovers the
-# chat id, stores the bot token in deploy/.env and flips `enabled` here.
+# The panel manages destinations, so the row only needs to exist. Bots added
+# from the page live in settings.yaml under `telegram:`; their tokens live in
+# the credential store. A deployment wired through deploy/.env before the panel
+# existed keeps working as a read-only destination.
 - insert:
     - id: ext-telegram
       name: dsh-ext-telegram
       config:
-        enabled: !!js (process.env.TELEGRAM_BOT_TOKEN ?? '') !== '' && (process.env.TELEGRAM_CHAT_ID ?? '') !== ''
-        chatId: !!js process.env.TELEGRAM_CHAT_ID ?? ''
-        mode: stream
-        tools: compact
+        panel: true

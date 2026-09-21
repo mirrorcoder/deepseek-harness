@@ -1,120 +1,204 @@
-// dsh-ext-telegram — live broadcast of every session into Telegram.
+// dsh-ext-telegram — live broadcast of every session into Telegram, managed
+// from inside the harness.
 //
-// One session becomes one topic (thread) in the configured chat, so the phone
+// One session becomes one topic (thread) in each configured chat, so the phone
 // shows the same structure as the sidebar: the ask, what the agent answered,
 // which tools it reached for, anything it is blocked on, and how long the run
-// took. Telegram lets a bot open topics in a private chat, so the target can be
-// the operator's own chat with the bot; a forum supergroup works the same way.
-// If topics are refused (an ordinary group, an old client), the extension falls
-// back to plain messages prefixed with the session title and says so once.
+// took. Telegram lets a bot open topics inside a private chat, so the target
+// can be the operator's own chat with the bot; a forum supergroup behaves the
+// same. A chat without topics falls back to plain prefixed messages.
+//
+// Bots are added from the page: the ✈ button opens a panel that talks to this
+// extension's own routes, which sit inside the harness authentication fence.
+// Tokens go to the credential store ($DSH_HOME/.credentials.yaml), never to
+// settings, the session log or the browser; the panel only ever learns whether
+// a token exists. Destinations live in settings.yaml under `telegram`, so they
+// survive restarts and can also be edited by hand.
 //
 // Nothing here talks to the model, so a broadcast failure can never fail a
-// turn: the outbox is fire-and-forget, rate-limited and bounded.
+// turn: every outbox is serial, rate-limited, bounded, and reports rather than
+// raises.
 import z from '@deepseek-ai/schemastery'
-import { TelegramClient } from './telegram.js'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import { TelegramClient, callTelegram } from './telegram.js'
 import { completionText, errorText, formatEvent, topicTitle } from './format.js'
+import { envDestination, tokenRef } from './destinations.js'
+import { createHandlers, dispatch } from './routes.js'
+import { panelRows } from './panel.js'
 
 export const name = 'ext-telegram'
 
-export const Config = z.object({
-  enabled: z.boolean().default(false),
-  /** Credential reference (environment variable) holding the bot token. */
-  tokenEnv: z.string().role('credential-ref').default('TELEGRAM_BOT_TOKEN'),
-  /** Target chat: the operator's own chat with the bot, or a supergroup id. */
+const Destination = z.object({
+  id: z.string().required(),
+  label: z.string().default(''),
   chatId: z.string().default(''),
-  /** `stream` posts the conversation live; `summary` posts only completions, approvals and errors. */
   mode: z.union(['stream', 'summary']).default('stream'),
-  /** Tool calls in the stream: `compact` is one line each, `off` posts none. */
   tools: z.union(['compact', 'off']).default('compact'),
-  /** One topic per session when the chat supports it. */
   topics: z.boolean().default(true),
-  /** Runs shorter than this are not worth a completion ping. */
+  enabled: z.boolean().default(true),
   minRunSeconds: z.number().default(45),
-  /** Minimum gap between messages; Telegram throttles a chat past roughly one per second. */
+})
+
+export const Config = z.object({
+  /** Destinations; the panel writes these, and they can be edited by hand. */
+  destinations: z.array(Destination).default([]),
+  /** Show the ✈ button and serve its routes. */
+  panel: z.boolean().default(true),
+  /** Minimum gap between messages to one chat; Telegram throttles past roughly one per second. */
   minIntervalMs: z.number().default(1200),
-  /** Outbox bound; past it the oldest are dropped rather than growing without limit. */
+  /** Outbox bound per destination. */
   maxQueue: z.number().default(200),
 })
 
+const SETTINGS_NS = 'telegram'
 const SUMMARY_KINDS = new Set(['approval', 'title'])
+const ROUTE_PREFIX = '/api/telegram/'
 
-export function apply(ctx, config) {
-  if (!config.enabled) return
+export function apply(ctx, initial) {
+  let config = initial
 
-  const token = process.env[config.tokenEnv] ?? ''
-  if (token.length === 0 || config.chatId.length === 0) {
-    ctx.logger?.warn?.(`ext-telegram: disabled — set ${config.tokenEnv} and chatId (see deploy/telegram.sh)`)
-    return
-  }
-
-  let topicsUsable = config.topics
-  const client = new TelegramClient({
-    token,
-    chatId: config.chatId,
-    minIntervalMs: config.minIntervalMs,
-    maxQueue: config.maxQueue,
-    onError: (error) => {
-      if (topicsUsable && /thread|topic|forum/i.test(error.message)) {
-        topicsUsable = false
-        ctx.logger?.warn?.(`ext-telegram: topics unavailable in this chat, falling back to plain messages (${error.message})`)
-        return
-      }
-      ctx.logger?.warn?.(`ext-telegram: ${error.message}`)
-    },
+  // ── settings: the durable list of destinations ────────────────────────────
+  let scope
+  ctx.inject(['settings'], (sctx) => {
+    scope = sctx.settings.register(SETTINGS_NS, Config)
+    sctx.effect(() => scope.watch(() => {
+      config = { ...config, ...scope.get() }
+      rebuild()
+    }))
+    config = { ...config, ...scope.get() }
+    rebuild()
   })
 
-  /** Per-session broadcast state: the thread, its label, and the open run. */
-  const sessions = new WeakMap()
-  const stateFor = (session) => {
-    let state = sessions.get(session)
+  const readDestinations = async () => (scope?.get()?.destinations ?? config.destinations ?? [])
+  const writeDestinations = async (list) => {
+    if (scope === undefined) throw new Error('settings are not available in this composition')
+    await scope.update({ destinations: list })
+    config = { ...config, ...scope.get() }
+    rebuild()
+  }
+
+  // ── credentials: one token per destination, never leaving the host ────────
+  const getToken = async (ref) => {
+    const credentials = ctx.get('credentials')
+    if (credentials === undefined) return process.env[ref]
+    const resolved = await credentials.resolve(credentialRef(ref))
+    return resolved?.value ?? process.env[ref]
+  }
+  const setToken = async (ref, value) => {
+    const credentials = ctx.get('credentials')
+    if (credentials === undefined) throw new Error('no credential store is mounted, so a token cannot be saved')
+    await credentials.set(credentialRef(ref), value)
+  }
+  const clearToken = async (ref) => {
+    const credentials = ctx.get('credentials')
+    if (credentials === undefined) return
+    await credentials.unset(credentialRef(ref)).catch(() => {})
+  }
+
+  // ── live broadcasters, rebuilt whenever the configuration moves ───────────
+  /** id → { destination, client, token, sessions } */
+  let targets = new Map()
+
+  const rebuild = () => {
+    const wanted = [...(config.destinations ?? [])]
+    const fromEnv = envDestination(process.env)
+    if (fromEnv !== undefined) wanted.unshift(fromEnv)
+    const next = new Map()
+    for (const destination of wanted) {
+      if (!destination.enabled) continue
+      const previous = targets.get(destination.id)
+      next.set(destination.id, previous !== undefined && previous.destination.chatId === destination.chatId
+        ? { ...previous, destination }
+        : { destination, client: undefined, sessions: new WeakMap(), topicsUsable: destination.topics })
+    }
+    targets = next
+  }
+
+  const clientFor = async (target) => {
+    if (target.client !== undefined) return target.client
+    const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
+    const token = await getToken(ref)
+    if (token === undefined || token.length === 0) {
+      ctx.logger?.warn?.(`ext-telegram: ${target.destination.label || target.destination.id} has no token stored`)
+      return undefined
+    }
+    target.client = new TelegramClient({
+      token,
+      chatId: target.destination.chatId,
+      minIntervalMs: config.minIntervalMs,
+      maxQueue: config.maxQueue,
+      onError: (error) => {
+        if (target.topicsUsable && /thread|topic|forum/i.test(error.message)) {
+          target.topicsUsable = false
+          ctx.logger?.warn?.(`ext-telegram: topics unavailable in chat ${target.destination.chatId}, falling back to plain messages`)
+          return
+        }
+        ctx.logger?.warn?.(`ext-telegram: ${error.message}`)
+      },
+    })
+    return target.client
+  }
+
+  const stateFor = (target, session) => {
+    let state = target.sessions.get(session)
     if (state === undefined) {
       state = { threadId: undefined, opening: undefined, label: 'dsh session', announced: false }
-      sessions.set(session, state)
+      target.sessions.set(session, state)
     }
     return state
   }
 
-  /** Post into the session's thread, opening it on first use. */
-  const post = (session, text, seed) => {
-    const state = stateFor(session)
-    if (!topicsUsable) {
-      client.post(state.announced ? text : `[${state.label}]\n${text}`)
-      state.announced = true
-      return
+  /** Post one line to a single destination, opening its thread on first use. */
+  const send = (target, session, text, seed) => {
+    void (async () => {
+      const client = await clientFor(target)
+      if (client !== undefined) broadcastTo(target, client, session, text, seed)
+    })()
+  }
+
+  /** Post one line to every enabled destination that wants this kind. */
+  const broadcast = (session, text, kind, seed) => {
+    for (const target of targets.values()) {
+      if (kind !== undefined && target.destination.mode === 'summary' && !SUMMARY_KINDS.has(kind)) continue
+      send(target, session, text, seed)
     }
-    if (state.threadId !== undefined) {
-      client.post(text, state.threadId)
-      return
-    }
-    if (state.opening === undefined) {
-      state.label = topicTitle(seed ?? state.label)
-      state.opening = client.createTopic(state.label).then((id) => {
-        state.threadId = id
-        if (id === undefined) topicsUsable = false
-      })
-    }
-    void state.opening.then(() => {
-      client.post(text, state.threadId)
-    })
   }
 
   // ── the conversation ──────────────────────────────────────────────────────
   ctx.on('session/event', (session, event) => {
-    const line = formatEvent(event, { tools: config.tools })
+    if (targets.size === 0) return
+    // Tool verbosity is per destination, so ask for the richest form and let
+    // each destination drop what it does not want.
+    const line = formatEvent(event, { tools: 'compact' })
     if (line === undefined) return
-    if (config.mode === 'summary' && !SUMMARY_KINDS.has(line.kind)) return
-    if (line.kind === 'title') {
-      const state = stateFor(session)
-      state.label = topicTitle(event.data.title)
+    for (const target of targets.values()) {
+      if (line.kind === 'tool' && target.destination.tools === 'off') continue
+      if (target.destination.mode === 'summary' && !SUMMARY_KINDS.has(line.kind)) continue
+      if (line.kind === 'title') stateFor(target, session).label = topicTitle(event.data.title)
+      send(target, session, line.text, line.kind === 'user' ? line.text.replace(/^👤\s*/, '') : undefined)
     }
-    post(session, line.text, line.kind === 'user' ? line.text.replace(/^👤\s*/, '') : undefined)
   })
+
+  /** The per-target half of `send`, once a client is known. */
+  const broadcastTo = (target, client, session, text, seed) => {
+    const state = stateFor(target, session)
+    if (!target.topicsUsable) {
+      client.post(state.announced ? text : `[${state.label}]\n${text}`)
+      state.announced = true
+      return
+    }
+    if (state.threadId === undefined && state.opening === undefined) {
+      state.label = topicTitle(seed ?? state.label)
+      state.opening = client.createTopic(state.label).then((id) => {
+        state.threadId = id
+        if (id === undefined) target.topicsUsable = false
+      })
+    }
+    void Promise.resolve(state.opening).then(() => client.post(text, state.threadId))
+  }
 
   // ── run boundaries ────────────────────────────────────────────────────────
   const runs = new WeakMap()
-  // What this run reported, keyed by session id (the only identity a model
-  // request carries). The meter owns the authoritative view; this is just the
-  // number the completion line quotes.
   const runUsage = new Map()
   const zeroUsage = () => ({ total: 0, cacheRead: 0, billedInput: 0 })
 
@@ -128,14 +212,16 @@ export function apply(ctx, config) {
     runs.delete(agent)
     const totals = runUsage.get(agent.session.id)
     runUsage.delete(agent.session.id)
-    if (started === undefined) return
+    if (started === undefined || targets.size === 0) return
     const elapsed = Date.now() - started
-    if (elapsed < config.minRunSeconds * 1000) return
-    post(agent.session, completionText(elapsed, totals))
+    for (const target of targets.values()) {
+      if (elapsed < target.destination.minRunSeconds * 1000) continue
+      send(target, agent.session, completionText(elapsed, totals))
+    }
   })
 
   ctx.on('agent/error', ({ agent, error }) => {
-    post(agent.session, errorText(error))
+    broadcast(agent.session, errorText(error), 'approval')
   })
 
   ctx.on('llm/stream', (options, next) => (async function* () {
@@ -155,21 +241,62 @@ export function apply(ctx, config) {
     }
   })())
 
-  // ── /tg: test the wiring from inside a session ────────────────────────────
+  // ── the panel: routes inside the authentication fence, plus its markup ────
+  if (config.panel) {
+    const handlers = createHandlers({
+      list: readDestinations,
+      save: writeDestinations,
+      getToken,
+      setToken,
+      clearToken,
+      api: (token, method, payload) => callTelegram(token, method, payload),
+      envDestination: () => envDestination(process.env),
+      reload: rebuild,
+    })
+
+    ctx.inject(['connection'], (cctx) => {
+      cctx.effect(() => cctx.connection.fetch.register({
+        path: `${ROUTE_PREFIX}*`,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: async (request) => {
+          const action = new URL(request.url).pathname.slice(ROUTE_PREFIX.length)
+          let body = {}
+          try {
+            body = await request.json()
+          } catch {
+            body = {}
+          }
+          return dispatch(handlers, action, body)
+        },
+      }), 'ext-telegram: panel routes')
+    })
+
+    ctx.inject(['webServer'], (wctx) => {
+      const rows = panelRows()
+      wctx.on('webserver/index-inject', (table) => {
+        for (const row of rows) table.push(row)
+      })
+    })
+  }
+
+  // ── /tg: check the wiring from inside a session ───────────────────────────
   ctx.inject(['commands'], (cctx) => {
     cctx.effect(() => cctx.commands.register({
       name: 'tg',
-      description: 'Send a test line to the Telegram broadcast and report the outbox state',
+      description: 'Send a test line to every Telegram destination and report their state',
       recordInput: false,
       handler: ({ agent }) => {
-        post(agent.session, '🔔 Проверка связи из dsh')
-        return {
-          kind: 'success',
-          text: [
-            `Telegram broadcast: ${config.mode}, tools ${config.tools}, topics ${topicsUsable ? 'on' : 'off (fallback)'}`,
-            `chat ${config.chatId} · sent ${client.sent} · queued ${client.queue.length} · dropped ${client.dropped}`,
-          ].join('\n'),
+        if (targets.size === 0) {
+          return { kind: 'success', text: 'Ни одного включённого бота. Открой панель ✈ справа внизу и добавь.' }
         }
+        broadcast(agent.session, '🔔 Проверка связи из dsh')
+        const lines = [...targets.values()].map((t) => {
+          const client = t.client
+          return `${t.destination.label || t.destination.id}: chat ${t.destination.chatId}, ${t.destination.mode}, треды ${t.topicsUsable ? 'да' : 'нет'}`
+            + (client === undefined ? ', ещё не отправлял' : `, отправлено ${client.sent}, в очереди ${client.queue.length}, потеряно ${client.dropped}`)
+        })
+        return { kind: 'success', text: lines.join('\n') }
       },
     }))
   })

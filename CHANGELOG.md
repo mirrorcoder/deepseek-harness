@@ -12,6 +12,25 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.7.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Bots are added from the page.** The ✈ button opens a panel that adds,
+  tests, enables and removes Telegram destinations without touching a shell:
+  paste a token, let it validate against `getMe`, press "найти чаты" to list
+  the chats that have written to the bot, pick one, done. Several bots and
+  chats can run at once, each with its own verbosity.
+  Tokens go to the credential store (`$DSH_HOME/.credentials.yaml`) and never
+  into settings, the session log or the browser — the panel only ever learns
+  whether a token exists. Destinations live in `settings.yaml` under
+  `telegram:` and are applied live, with no restart.
+  The panel's routes are registered inside the harness authentication fence,
+  so they are reachable only by an authenticated session, exactly like the
+  rest of `/api`.
+- A deployment wired through `deploy/.env` before the panel existed keeps
+  working, shown as a read-only destination.
+
 ## v1.6.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

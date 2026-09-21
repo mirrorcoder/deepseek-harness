@@ -4,6 +4,22 @@ import { TELEGRAM_MAX } from './format.js'
 
 const API = 'https://api.telegram.org'
 
+/**
+ * One Bot API call without a client: what the management panel needs before a
+ * destination exists (validating a token, listing chats, a test message).
+ * @throws the API's own description, so the panel can show it verbatim.
+ */
+export async function callTelegram(token, method, payload = {}, fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl(`${API}/bot${token}/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const body = await response.json()
+  if (body?.ok !== true) throw new Error(body?.description ?? `HTTP ${response.status}`)
+  return body.result
+}
+
 export class TelegramClient {
   /**
    * @param {{token: string, chatId: string, minIntervalMs?: number,
