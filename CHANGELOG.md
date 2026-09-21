@@ -12,6 +12,20 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.5.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **"What is this build" panel** (`dsh-ext-about`). A small `i` button in the
+  bottom-right corner opens a panel listing the fork version and the upstream
+  release it is built on, every extension installed on top, and the release
+  history with dates — this changelog, baked into the image and rendered from
+  it. The Web UI's own panels are React plugins built inside the monorepo,
+  which a package installed from outside it cannot produce, so this is a
+  self-contained overlay contributed through the page's structured injection
+  seam: scoped styles, one button, one dialog, a few lines of vanilla script,
+  and nothing the app owns is touched.
+
 ## v1.4.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

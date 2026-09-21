@@ -1,0 +1,6 @@
+# Host-plane row: the panel is page furniture, not an agent capability.
+- insert:
+    - id: ext-about
+      name: dsh-ext-about
+      config:
+        enabled: true

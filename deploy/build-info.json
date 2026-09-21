@@ -1,11 +1,12 @@
 {
-  "forkVersion": "1.4.0",
+  "forkVersion": "1.5.0",
   "upstreamBase": "dsh-v0.1.5-rc.2",
   "upstreamNpm": "0.1.5-rc.2",
   "releasedAt": "2026-09-21",
   "repository": "https://github.com/mirrorcoder/deepseek-harness",
   "mirror": "https://ds.jusl.me/git/deepseek-harness.git",
   "extensions": {
+    "dsh-ext-about": "0.1.0",
     "dsh-ext-compaction-pro": "0.1.0",
     "dsh-ext-efficiency": "0.1.0",
     "dsh-ext-image-gen": "0.1.0",

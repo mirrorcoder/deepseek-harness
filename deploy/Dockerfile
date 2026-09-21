@@ -45,6 +45,8 @@ RUN ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin
 # Release stamp of THIS fork (deploy/gen-build-info.sh writes it; /version reads it).
 COPY VERSION /opt/dsh/VERSION
 COPY deploy/build-info.json /opt/dsh/build-info.json
+# Read by dsh-ext-about to show what this fork added and when.
+COPY CHANGELOG.md /opt/dsh/CHANGELOG.md
 COPY deploy/web-docker.patch.yml /opt/dsh/web-docker.patch.yml
 COPY deploy/features.patch.yml /opt/dsh/features.patch.yml
 COPY deploy/entrypoint.sh /opt/dsh/entrypoint.sh
