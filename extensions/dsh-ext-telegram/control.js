@@ -148,6 +148,7 @@ export async function handleMessage(message, deps) {
       const sessionId = bindings.numbered(message.chatId, message.threadId, n)
       if (sessionId === undefined) return 'Сначала /sessions, потом /use N из этого списка.'
       bindings.bind(message.chatId, message.threadId, sessionId)
+      deps.adopt?.(message.chatId, message.threadId, sessionId)
       return `Готово: пишу в сессию ${n}. Просто отправь текст.`
     }
     case '/new': {
@@ -166,6 +167,7 @@ export async function handleMessage(message, deps) {
       }
       const sessionId = await deps.create(cwd)
       bindings.bind(message.chatId, message.threadId, sessionId)
+      deps.adopt?.(message.chatId, message.threadId, sessionId)
       return [
         `Сессия создана${cwd ? ` в ${cwd}` : ''}.`,
         'Пиши сюда — уйдёт в неё. Как только она заговорит, у неё появится свой тред.',
@@ -183,7 +185,7 @@ export async function handleMessage(message, deps) {
       if (sessionId === undefined) {
         return 'Некуда отправить: сессия не привязана. /sessions → /use N, или /new.'
       }
-      await deps.prompt(sessionId, text)
+      await deps.prompt(sessionId, text, message)
       return undefined
     }
   }

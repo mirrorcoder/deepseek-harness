@@ -1,6 +1,6 @@
 {
   "name": "dsh-ext-telegram",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Telegram bridge: live session broadcast into topics, bots managed from the page, and a bot you can drive the harness from",
   "type": "module",
   "main": "index.js",
@@ -15,12 +15,14 @@
     "poller.js",
     "control.js",
     "topics.js",
+    "run-view.js",
     "cordis.patch.yml",
     "test.mjs",
     "test-manage.mjs",
     "test-poller.mjs",
     "test-control.mjs",
-    "test-topics.mjs"
+    "test-topics.mjs",
+    "test-run-view.mjs"
   ],
   "dsh": {
     "bundle": {

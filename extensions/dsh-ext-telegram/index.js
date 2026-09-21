@@ -32,6 +32,7 @@ import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
 import { Bindings, handleMessage } from './control.js'
 import { topicSpec, topicName, workspaceOf } from './topics.js'
+import { RunView } from './run-view.js'
 
 export const name = 'ext-telegram'
 
@@ -61,6 +62,8 @@ export const Config = z.object({
   minIntervalMs: z.number().default(1200),
   /** Outbox bound per destination. */
   maxQueue: z.number().default(200),
+  /** How often a streaming answer redraws its message; Telegram throttles edits. */
+  editIntervalMs: z.number().default(1800),
 })
 
 const SETTINGS_NS = 'telegram'
@@ -180,15 +183,23 @@ export function apply(ctx, initial) {
     },
     workspaces: () => listWorkspaces(),
     workspaceOf,
+    adopt: (chatId, threadId, sessionId) => adoptThread(chatId, threadId, sessionId),
     create: async (cwd) => {
       const controller = ctx.get('sessionController')
       if (controller === undefined) throw new Error('session controller is not mounted')
       const created = await controller.create(cwd === undefined ? {} : { cwd })
       return created.sessionId
     },
-    prompt: async (sessionId, text) => {
+    prompt: async (sessionId, text, message) => {
       const controller = ctx.get('sessionController')
       if (controller === undefined) throw new Error('session controller is not mounted')
+      // The thread this came from is where the session lives from now on, and
+      // the harness will echo this very text back as a user message.
+      if (message !== undefined) {
+        threadSessions.set(`${message.chatId}:${message.threadId ?? ''}`, sessionId)
+        adoptThread(message.chatId, message.threadId, sessionId)
+      }
+      rememberOwnPrompt(sessionId, text)
       await controller.prompt({
         requestId: randomUUID(),
         sessionId,
@@ -272,7 +283,7 @@ export function apply(ctx, initial) {
                 chatId: chat.id,
                 threadId: chat.threadId,
                 threadSession: threadSessions.get(`${chat.id}:${chat.threadId ?? ''}`),
-              }, controlDeps)
+              }, { ...controlDeps, chat })
             } catch (error) {
               note(error)
               return `Не получилось: ${error instanceof Error ? error.message : String(error)}`
@@ -322,13 +333,34 @@ export function apply(ctx, initial) {
     return target.client
   }
 
+  /**
+   * `destination:sessionId` → thread the operator is already writing in. A
+   * message that arrives in a thread makes that thread the session's home;
+   * opening a second topic for the same session (as this did at first) splits
+   * one conversation across two threads.
+   */
+  const adoptedThreads = new Map()
+
   const stateFor = (target, session) => {
     let state = target.sessions.get(session)
     if (state === undefined) {
       state = { threadId: undefined, opening: undefined, label: 'dsh session', announced: false }
       target.sessions.set(session, state)
     }
+    if (state.threadId === undefined) {
+      const adopted = adoptedThreads.get(`${target.destination.id}:${session.id}`)
+      if (adopted !== undefined) state.threadId = adopted
+    }
     return state
+  }
+
+  /** Remember where a session is being talked to, so output joins that thread. */
+  const adoptThread = (chatId, threadId, sessionId) => {
+    if (threadId === undefined || sessionId === undefined) return
+    for (const target of targets.values()) {
+      if (target.destination.chatId !== String(chatId)) continue
+      adoptedThreads.set(`${target.destination.id}:${sessionId}`, threadId)
+    }
   }
 
   /** Post one line to a single destination, opening its thread on first use. */
@@ -348,51 +380,128 @@ export function apply(ctx, initial) {
   }
 
   // ── the conversation ──────────────────────────────────────────────────────
+  /** destination:sessionId → the live turn message being edited. */
+  const runViews = new Map()
+  const viewKey = (target, session) => `${target.destination.id}:${session.id}`
+
+  /** Prompts this bridge sent, so the harness echoing them back is suppressed. */
+  const ownPrompts = new Map()
+  const rememberOwnPrompt = (sessionId, text) => {
+    const key = `${sessionId}:${text.trim()}`
+    ownPrompts.set(key, Date.now())
+    // A fingerprint is only interesting until the harness commits the message.
+    for (const [old, at] of ownPrompts) if (Date.now() - at > 60_000) ownPrompts.delete(old)
+  }
+  const isOwnPrompt = (sessionId, text) => {
+    const key = `${sessionId}:${String(text).trim()}`
+    if (!ownPrompts.has(key)) return false
+    ownPrompts.delete(key)
+    return true
+  }
+
+  /** The live turn message for one destination, opened on demand. */
+  const viewFor = async (target, session) => {
+    const key = viewKey(target, session)
+    const existing = runViews.get(key)
+    if (existing !== undefined) return existing
+    const client = await clientFor(target)
+    if (client === undefined) return undefined
+    const threadId = await threadFor(target, client, session)
+    const view = new RunView(client, threadId, { intervalMs: config.editIntervalMs })
+    runViews.set(key, view)
+    void view.open()
+    return view
+  }
+
   ctx.on('session/event', (session, event) => {
     if (targets.size === 0) return
-    // Tool verbosity is per destination, so ask for the richest form and let
-    // each destination drop what it does not want.
-    const line = formatEvent(event, { tools: 'compact' })
-    if (line === undefined) return
+    const data = event.data ?? {}
     for (const target of targets.values()) {
-      if (line.kind === 'tool' && target.destination.tools === 'off') continue
-      if (target.destination.mode === 'summary' && !SUMMARY_KINDS.has(line.kind)) continue
-      if (line.kind === 'title') {
-        const state = stateFor(target, session)
-        const named = topicName(state.workspace ?? workspaceOf(session.header?.cwd ?? session.cwd, listWorkspaces()), event.data.title)
-        state.label = named
-        // A thread that opened as "project · новая сессия" becomes the real
-        // subject the moment the session earns one.
-        if (state.threadId !== undefined) void clientFor(target).then((c) => c?.renameTopic(state.threadId, named))
-      }
-      send(target, session, line.text, line.kind === 'user' ? line.text.replace(/^👤\s*/, '') : undefined)
+      const summary = target.destination.mode === 'summary'
+      void (async () => {
+        switch (event.type) {
+          case 'user/message': {
+            const line = formatEvent(event, { tools: target.destination.tools })
+            if (line === undefined) return
+            // What came from this bridge is already on screen as the operator's
+            // own message; echoing it back is noise.
+            if (isOwnPrompt(session.id, line.text.replace(/^👤\s*/, ''))) return
+            if (summary) return
+            const client = await clientFor(target)
+            if (client === undefined) return
+            client.post(line.text, await threadFor(target, client, session, line.text.replace(/^👤\s*/, '')))
+            return
+          }
+          case 'assistant/message': {
+            // The stream already wrote this; only fill in when no frames came.
+            const view = runViews.get(viewKey(target, session))
+            if (view === undefined || view.text.length > 0) return
+            const line = formatEvent(event, { tools: target.destination.tools })
+            if (line !== undefined) view.appendText(line.text.replace(/^🤖\s*/, ''))
+            return
+          }
+          case 'tool/call': {
+            if (summary || target.destination.tools === 'off') return
+            const view = await viewFor(target, session)
+            view?.setTool(data.name, argumentDigest(data.arguments))
+            return
+          }
+          case 'approval/asked': {
+            const client = await clientFor(target)
+            if (client === undefined) return
+            const line = formatEvent(event, { tools: target.destination.tools })
+            if (line !== undefined) client.post(line.text, await threadFor(target, client, session))
+            return
+          }
+          case 'session/title': {
+            const state = stateFor(target, session)
+            const named = topicName(state.workspace ?? workspaceOf(session.header?.cwd ?? session.cwd, listWorkspaces()), data.title)
+            state.label = named
+            const client = await clientFor(target)
+            if (client !== undefined && state.threadId !== undefined) await client.renameTopic(state.threadId, named)
+            return
+          }
+          default:
+        }
+      })()
     }
   })
 
-  /** The per-target half of `send`, once a client is known. */
-  const broadcastTo = (target, client, session, text, seed) => {
-    const state = stateFor(target, session)
-    if (!target.topicsUsable) {
-      // Without threads every session lands in one flat conversation, so each
-      // line carries its session's name — otherwise two sessions interleave
-      // into an unreadable stream.
-      client.post(`[${state.label}] ${text}`)
-      state.announced = true
-      return
+  /** One-line digest of tool arguments for the status line. */
+  const argumentDigest = (args) => {
+    if (args === null || args === undefined) return undefined
+    if (typeof args === 'string') return args.slice(0, 80)
+    if (typeof args !== 'object') return String(args)
+    for (const key of ['path', 'file_path', 'command', 'cmd', 'pattern', 'query', 'prompt', 'url']) {
+      const value = args[key]
+      if (typeof value === 'string' && value.length > 0) return value.replace(/\s+/g, ' ').slice(0, 80)
     }
-    if (state.threadId === undefined && state.opening === undefined) {
+    return undefined
+  }
+
+  /**
+   * The thread a session speaks in: one the operator adopted, else one opened
+   * for it, named and coloured by its project.
+   */
+  const threadFor = async (target, client, session, seed) => {
+    const state = stateFor(target, session)
+    if (state.threadId !== undefined) return state.threadId
+    if (!target.topicsUsable) return undefined
+    if (state.opening === undefined) {
       const spec = topicSpec({ cwd: session.header?.cwd ?? session.cwd, title: seed }, listWorkspaces())
       state.label = spec.name
       state.workspace = spec.workspace
       state.opening = client.createTopic(spec.name, spec.iconColor).then((id) => {
         state.threadId = id
         if (id === undefined) target.topicsUsable = false
-        // Remember which session a thread belongs to, so a reply typed inside
-        // it reaches that session without any binding command.
-        else threadSessions.set(`${target.destination.chatId}:${id}`, session.id)
+        else {
+          threadSessions.set(`${target.destination.chatId}:${id}`, session.id)
+          adoptedThreads.set(`${target.destination.id}:${session.id}`, id)
+        }
+        return id
       })
     }
-    void Promise.resolve(state.opening).then(() => client.post(text, state.threadId))
+    return state.opening
   }
 
   // ── run boundaries ────────────────────────────────────────────────────────
@@ -404,17 +513,46 @@ export function apply(ctx, initial) {
     if (status === 'running') {
       runs.set(agent, Date.now())
       runUsage.set(agent.session.id, zeroUsage())
+      // Open the turn message immediately: the thread should show life before
+      // the first token arrives.
+      for (const target of targets.values()) {
+        if (target.destination.mode === 'summary') continue
+        void viewFor(target, agent.session)
+      }
       return
     }
     const started = runs.get(agent)
     runs.delete(agent)
     const totals = runUsage.get(agent.session.id)
     runUsage.delete(agent.session.id)
-    if (started === undefined || targets.size === 0) return
-    const elapsed = Date.now() - started
+    const elapsed = started === undefined ? 0 : Date.now() - started
     for (const target of targets.values()) {
-      if (elapsed < target.destination.minRunSeconds * 1000) continue
-      send(target, agent.session, completionText(elapsed, totals))
+      const key = viewKey(target, agent.session)
+      const view = runViews.get(key)
+      runViews.delete(key)
+      if (view !== undefined) {
+        void view.finish(completionText(elapsed, totals).replace(/^✅\s*/, '✅ '))
+        continue
+      }
+      // Summary destinations keep the old one-line completion ping.
+      if (started !== undefined && elapsed >= target.destination.minRunSeconds * 1000) {
+        send(target, agent.session, completionText(elapsed, totals))
+      }
+    }
+  })
+
+  // The answer as it is written: frames carry raw deltas, which the turn
+  // message absorbs. No frames (a provider without streaming) is fine — the
+  // durable `assistant/message` fills the body instead.
+  ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+    if (frame?.type !== 'chunk' || targets.size === 0) return
+    const chunk = frame.chunk
+    if (chunk?.type !== 'text-delta' || typeof chunk.text !== 'string') return
+    for (const target of targets.values()) {
+      if (target.destination.mode === 'summary') continue
+      const view = runViews.get(viewKey(target, agent.session))
+      if (view !== undefined) view.appendText(chunk.text)
+      else void viewFor(target, agent.session).then((opened) => opened?.appendText(chunk.text))
     }
   })
 

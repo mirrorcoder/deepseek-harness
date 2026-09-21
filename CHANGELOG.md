@@ -12,6 +12,29 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.11.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+The bridge wrote to Telegram like a log file. It now writes like a chat.
+
+- **One message per turn, edited as the answer streams.** A turn opens a single
+  message ("думаю…"), fills with the answer as the model writes it, shows what
+  the agent is doing right now on its own line, and closes with duration and
+  token cost. Redraws are rate-limited and coalesced in the outbox: a fast
+  stream costs a couple of API calls per second, not one message per tool call.
+- **No echo.** A prompt sent from Telegram is no longer mirrored back as the
+  harness commits it; prompts typed in the web UI still appear, because those
+  the phone has not seen.
+- **The thread you write in is the thread it answers in.** Writing in a topic
+  binds that session to that topic, so the bridge stops opening a second thread
+  beside the one already in use.
+- **Formatting.** Telegram HTML: the status line and the footer are italic, tool
+  arguments are monospace, and everything the model wrote is escaped, so a
+  stray tag cannot break the message.
+- Tool calls no longer occupy a message each; they are the status line of the
+  turn they belong to.
+
 ## v1.10.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

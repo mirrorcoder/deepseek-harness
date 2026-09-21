@@ -38,6 +38,7 @@ export class TelegramClient {
     this.lastSentAt = 0
     this.dropped = 0
     this.sent = 0
+    this.edited = 0
   }
 
   async call(method, payload) {
@@ -91,7 +92,38 @@ export class TelegramClient {
       this.dropped++
       return
     }
-    this.queue.push({ text: text.slice(0, TELEGRAM_MAX), threadId })
+    this.queue.push({ kind: 'send', text: text.slice(0, TELEGRAM_MAX), threadId })
+    void this.drain()
+  }
+
+  /** Post and resolve with the message id, so it can be edited afterwards. */
+  postTracked(text, threadId, options = {}) {
+    return new Promise((resolve) => {
+      if (this.queue.length >= this.maxQueue) {
+        this.dropped++
+        resolve(undefined)
+        return
+      }
+      this.queue.push({ kind: 'send', text: text.slice(0, TELEGRAM_MAX), threadId, parseMode: options.parseMode ?? 'HTML', resolve })
+      void this.drain()
+    })
+  }
+
+  /**
+   * Replace a message's text. Edits to the same message COALESCE: a streaming
+   * answer redraws far faster than Telegram accepts edits, and only the latest
+   * body is worth sending, so a queued edit for the same message is overwritten
+   * rather than queued behind.
+   */
+  edit(messageId, text, threadId, options = {}) {
+    if (messageId === undefined) return
+    const body = text.slice(0, TELEGRAM_MAX)
+    const pending = this.queue.find((item) => item.kind === 'edit' && item.messageId === messageId)
+    if (pending !== undefined) {
+      pending.text = body
+      return
+    }
+    this.queue.push({ kind: 'edit', messageId, text: body, threadId, parseMode: options.parseMode ?? 'HTML' })
     void this.drain()
   }
 
@@ -117,17 +149,33 @@ export class TelegramClient {
         const item = this.queue.shift()
         this.lastSentAt = Date.now()
         try {
-          await this.call('sendMessage', {
-            chat_id: this.chatId,
-            text: item.text,
-            link_preview_options: { is_disabled: true },
-            ...(item.threadId === undefined ? {} : { message_thread_id: item.threadId }),
-          })
-          this.sent++
+          if (item.kind === 'edit') {
+            await this.call('editMessageText', {
+              chat_id: this.chatId,
+              message_id: item.messageId,
+              text: item.text,
+              ...(item.parseMode === undefined ? {} : { parse_mode: item.parseMode }),
+              link_preview_options: { is_disabled: true },
+            })
+            this.edited++
+          } else {
+            const message = await this.call('sendMessage', {
+              chat_id: this.chatId,
+              text: item.text,
+              ...(item.parseMode === undefined ? {} : { parse_mode: item.parseMode }),
+              link_preview_options: { is_disabled: true },
+              ...(item.threadId === undefined ? {} : { message_thread_id: item.threadId }),
+            })
+            this.sent++
+            item.resolve?.(message?.message_id)
+          }
         } catch (error) {
-          // A thread that no longer exists must not wedge the outbox: report
-          // once and keep draining the rest.
-          this.onError(error)
+          // A thread that no longer exists, or an edit that changed nothing,
+          // must not wedge the outbox: report and keep draining.
+          item.resolve?.(undefined)
+          // "message is not modified" is the API telling us the redraw was a
+          // no-op; that is normal for a coalesced stream, not a fault.
+          if (!/not modified/i.test(error.message)) this.onError(error)
         }
       }
     }
