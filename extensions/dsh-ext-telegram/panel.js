@@ -80,7 +80,8 @@ function row(d){
   var el=document.createElement('div')
   el.className='dsh-tg-row'
   var mode=d.mode==='summary'?'итоги':'всё'
-  el.innerHTML='<div><b>'+esc(d.label)+'</b> <span class="dsh-tg-dim">chat '+esc(d.chatId)+' · '+mode+(d.enabled?'':' · выключен')+(d.readOnly?' · из .env':'')+'</span></div>'
+  var listen={listening:'отвечает на команды',conflict:'команды заняты другим процессом','no-token':'нет токена',starting:'запускается',off:'команды выключены'}[d.listening]||''
+  el.innerHTML='<div><b>'+esc(d.label)+'</b> <span class="dsh-tg-dim">chat '+esc(d.chatId)+' · '+mode+(d.enabled?'':' · выключен')+(d.readOnly?' · из .env':'')+(listen?' · '+listen:'')+'</span></div>'
   var act=document.createElement('div');act.className='dsh-tg-act'
   act.appendChild(btn('Тест',function(){call('test',{id:d.id}).then(function(){say('ok','Отправлено в '+d.label)}).catch(function(e){say('err',e.message)})}))
   if(!d.readOnly){

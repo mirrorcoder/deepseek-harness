@@ -176,6 +176,45 @@ test('state exposes the roster without secrets, and dispatch guards unknown acti
   assert.equal((await thrown.json()).error, 'kaboom')
 })
 
+test('state reports whether the bot can answer, which a silent /start is about', async () => {
+  const { handlers } = harness({ list: [{ id: 'ops', label: 'Ops', chatId: '7' }], tokens: [['TELEGRAM_BOT_TOKEN_OPS', TOKEN]] })
+  assert.equal((await body(await handlers.state())).destinations[0].listening, 'off', 'no polling reporter wired means off')
+  const withPolling = createHandlers({
+    list: async () => [{ id: 'ops', label: 'Ops', chatId: '7' }],
+    save: async () => {}, setToken: async () => {}, clearToken: async () => {}, reload: () => {}, api: async () => ({}),
+    getToken: async () => TOKEN,
+    pollingState: () => 'listening',
+  })
+  assert.equal((await body(await withPolling.state())).destinations[0].listening, 'listening')
+  const noToken = createHandlers({
+    list: async () => [{ id: 'ops', label: 'Ops', chatId: '7' }],
+    save: async () => {}, setToken: async () => {}, clearToken: async () => {}, reload: () => {}, api: async () => ({}),
+    getToken: async () => undefined,
+    pollingState: () => 'listening',
+  })
+  const row = (await body(await noToken.state())).destinations[0]
+  assert.equal(row.hasToken, false)
+  assert.equal(row.listening, 'no-token')
+})
+
+test('a running poller owns discovery, because a second getUpdates would see nothing', async () => {
+  const seen = [{ id: '7', title: 'Roman', type: 'private' }]
+  let apiCalls = 0
+  const handlers = createHandlers({
+    list: async () => [{ id: 'ops', label: 'Ops', chatId: '7' }],
+    save: async () => {}, setToken: async () => {}, clearToken: async () => {}, reload: () => {},
+    getToken: async () => TOKEN,
+    api: async () => { apiCalls++; return [] },
+    seenChats: (id) => (id === 'ops' ? seen : []),
+  })
+  const answer = await body(await handlers.discover({ id: 'ops' }))
+  assert.deepEqual(answer.chats, seen)
+  assert.equal(apiCalls, 0, 'the cache answers instead of asking Telegram again')
+  // a token typed into the add form has no listener yet, so that path still asks
+  await handlers.discover({ token: TOKEN })
+  assert.equal(apiCalls, 1)
+})
+
 test('panel rows are well formed and cannot close their own element', () => {
   const rows = panelRows()
   assert.deepEqual(rows.map((r) => r.kind), ['style', 'html', 'script'])

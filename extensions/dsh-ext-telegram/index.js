@@ -58,23 +58,42 @@ export const Config = z.object({
 })
 
 const SETTINGS_NS = 'telegram'
+
+/**
+ * Fold a stored settings section over the plugin configuration.
+ *
+ * A plain spread is wrong here: a key the document does not mention can arrive
+ * as an explicit `undefined`, and spreading that erases the schema default
+ * behind it. That is how `commands` became undefined at boot and the bot went
+ * on politely saying nothing to every `/start`.
+ */
+export function mergeSection(base, section) {
+  const merged = { ...base }
+  for (const [key, value] of Object.entries(section ?? {})) {
+    if (value !== undefined) merged[key] = value
+  }
+  return merged
+}
 const SUMMARY_KINDS = new Set(['approval', 'title'])
 const ROUTE_PREFIX = '/api/telegram/'
 
 export function apply(ctx, initial) {
   let config = initial
+  /** Last thing that went wrong, surfaced through the panel's state route. */
+  let lastError
 
-  // ── settings: the durable list of destinations ────────────────────────────
+  const note = (error) => {
+    lastError = error instanceof Error ? error.message : String(error)
+    ctx.logger?.warn?.(`ext-telegram: ${lastError}`)
+  }
+
+  // The settings wiring is mounted at the END of this function on purpose: its
+  // callback can run the moment it is registered, and everything it reaches for
+  // (rebuild, the poller registry) is declared below. Mounting it here threw a
+  // temporal-dead-zone ReferenceError at boot, which left the broadcast with no
+  // destinations at all while the panel kept working — it calls Telegram
+  // directly — so the bridge looked wired and silently was not.
   let scope
-  ctx.inject(['settings'], (sctx) => {
-    scope = sctx.settings.register(SETTINGS_NS, Config)
-    sctx.effect(() => scope.watch(() => {
-      config = { ...config, ...scope.get() }
-      rebuild()
-    }))
-    config = { ...config, ...scope.get() }
-    rebuild()
-  })
 
   const readDestinations = async () => (scope?.get()?.destinations ?? config.destinations ?? [])
   const writeDestinations = async (list) => {
@@ -119,15 +138,20 @@ export function apply(ctx, initial) {
         : { destination, client: undefined, sessions: new WeakMap(), topicsUsable: destination.topics })
     }
     targets = next
-    void syncPollers()
+    syncPollers()
   }
 
   // ── the bot answers ───────────────────────────────────────────────────────
   /** token → { poller, chats: Map<id, chat> } */
   const pollers = new Map()
 
-  /** Chats a running poller has seen, newest first — what discover prefers. */
-  const seenChats = (token) => [...(pollers.get(token)?.chats.values() ?? [])].reverse()
+  /** Chats a running listener has seen, newest first — what discover prefers. */
+  const seenChats = (destinationId) => {
+    for (const entry of pollers.values()) {
+      if (entry.destinationId === destinationId) return [...entry.chats.values()].reverse()
+    }
+    return []
+  }
 
   const statusLine = () => {
     if (targets.size === 0) return 'Пока ни один чат не подключён.'
@@ -136,46 +160,64 @@ export function apply(ctx, initial) {
       .join('\n')
   }
 
-  /** Start a poller for every token that wants one; stop the rest. */
-  const syncPollers = async () => {
+  /**
+   * One listener per destination, keyed by its credential reference rather
+   * than by the token itself: at boot the credential store may not have loaded
+   * yet, and a listener keyed by a token that did not resolve then would never
+   * be created at all. The token is resolved inside each round instead, so a
+   * store that arrives late simply makes the first round fail and the next one
+   * succeed.
+   */
+  const syncPollers = () => {
     if (!config.commands) return
-    const wanted = new Map()
-    for (const target of targets.values()) {
-      const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
-      const token = await getToken(ref)
-      if (token !== undefined && token.length > 0) wanted.set(token, true)
-    }
-    for (const [token, entry] of pollers) {
-      if (!wanted.has(token)) {
-        entry.poller.stop()
-        pollers.delete(token)
+    try {
+      const wanted = new Map()
+      for (const target of targets.values()) {
+        wanted.set(target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id), target.destination.id)
       }
-    }
-    for (const token of wanted.keys()) {
-      if (pollers.has(token)) continue
-      const chats = new Map()
-      const poller = new UpdatePoller({
-        api: (method, payload) => callTelegram(token, method, payload),
-        onChat: (chat) => {
-          chats.delete(chat.id)
-          chats.set(chat.id, { id: chat.id, title: chat.title, type: chat.type })
-        },
-        reply: (chatId, text, threadId) => {
-          void callTelegram(token, 'sendMessage', {
-            chat_id: chatId,
-            text,
-            ...(threadId === undefined ? {} : { message_thread_id: threadId }),
-          }).catch((error) => ctx.logger?.warn?.(`ext-telegram: reply failed: ${error.message}`))
-        },
-        facts: (chatId) => ({
-          chatId,
-          configured: [...targets.values()].some((t) => t.destination.chatId === chatId),
-          status: statusLine(),
-        }),
-        onError: (error) => ctx.logger?.warn?.(`ext-telegram: ${error.message}`),
-      })
-      pollers.set(token, { poller, chats })
-      void poller.run()
+      for (const [ref, entry] of pollers) {
+        if (!wanted.has(ref)) {
+          entry.poller.stop()
+          pollers.delete(ref)
+        }
+      }
+      for (const [ref, destinationId] of wanted) {
+        if (pollers.has(ref)) continue
+        const chats = new Map()
+        const poller = new UpdatePoller({
+          api: async (method, payload) => {
+            const token = await getToken(ref)
+            if (token === undefined || token.length === 0) throw new Error('no token stored for this bot yet')
+            return callTelegram(token, method, payload)
+          },
+          onChat: (chat) => {
+            chats.delete(chat.id)
+            chats.set(chat.id, { id: chat.id, title: chat.title, type: chat.type })
+          },
+          reply: (chatId, text, threadId) => {
+            void (async () => {
+              const token = await getToken(ref)
+              if (token === undefined || token.length === 0) return
+              await callTelegram(token, 'sendMessage', {
+                chat_id: chatId,
+                text,
+                ...(threadId === undefined ? {} : { message_thread_id: threadId }),
+              }).catch(note)
+            })()
+          },
+          facts: (chatId) => ({
+            chatId,
+            configured: [...targets.values()].some((t) => t.destination.chatId === chatId),
+            status: statusLine(),
+          }),
+          onError: note,
+        })
+        pollers.set(ref, { poller, chats, destinationId })
+        void poller.run()
+      }
+    } catch (error) {
+      // A silent rejection here is exactly how the bot ended up never polling.
+      note(`could not start the update listener: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 
@@ -189,7 +231,7 @@ export function apply(ctx, initial) {
     const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
     const token = await getToken(ref)
     if (token === undefined || token.length === 0) {
-      ctx.logger?.warn?.(`ext-telegram: ${target.destination.label || target.destination.id} has no token stored`)
+      note(`${target.destination.label || target.destination.id} has no token stored`)
       return undefined
     }
     target.client = new TelegramClient({
@@ -321,6 +363,22 @@ export function apply(ctx, initial) {
       clearToken,
       api: (token, method, payload) => callTelegram(token, method, payload),
       seenChats,
+      runtime: () => ({
+        live: targets.size,
+        pollers: pollers.size,
+        commands: config.commands === true,
+        settingsLoaded: scope !== undefined,
+        lastError: lastError ?? null,
+      }),
+      pollingState: (destinationId) => {
+        if (!config.commands) return 'off'
+        for (const entry of pollers.values()) {
+          if (entry.destinationId !== destinationId) continue
+          if (entry.poller.conflict) return 'conflict'
+          return entry.poller.rounds > 0 ? 'listening' : 'starting'
+        }
+        return 'starting'
+      },
       envDestination: () => envDestination(process.env),
       reload: rebuild,
     })
@@ -353,6 +411,23 @@ export function apply(ctx, initial) {
       })
     })
   }
+
+  // ── settings: the durable list of destinations, applied live ──────────────
+  ctx.inject(['settings'], (sctx) => {
+    try {
+      scope = sctx.settings.register(SETTINGS_NS, Config)
+      sctx.effect(() => scope.watch(() => {
+        config = mergeSection(config, scope.get())
+        rebuild()
+      }))
+      config = mergeSection(config, scope.get())
+      rebuild()
+      ctx.logger?.info?.(`ext-telegram: ${targets.size} destination(s) live`)
+    } catch (error) {
+      // Boot failures here used to be invisible; the panel now shows them.
+      note(`could not load destinations: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
 
   // ── /tg: check the wiring from inside a session ───────────────────────────
   ctx.inject(['commands'], (cctx) => {

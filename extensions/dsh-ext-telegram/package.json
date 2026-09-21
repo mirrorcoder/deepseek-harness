@@ -1,6 +1,6 @@
 {
   "name": "dsh-ext-telegram",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Two-way Telegram bridge: live session broadcast into topics, bots managed from the page, and a bot that answers /start",
   "type": "module",
   "main": "index.js",

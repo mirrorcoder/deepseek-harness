@@ -28,11 +28,23 @@ export function createHandlers(deps) {
     /** Everything the panel renders, tokens reduced to a yes/no. */
     async state() {
       const list = await deps.list()
-      const rows = await Promise.all(list.map(async (d) => redact(d, {
-        hasToken: (await deps.getToken(tokenRef(d.id)))?.length > 0,
-      })))
+      const rows = await Promise.all(list.map(async (d) => {
+        const token = await deps.getToken(tokenRef(d.id))
+        return redact(d, {
+          hasToken: (token ?? '').length > 0,
+          // Whether the bot can answer here, which is what a silent /start is about.
+          listening: (token ?? '').length === 0 ? 'no-token' : (deps.pollingState?.(d.id) ?? 'off'),
+        })
+      }))
       const env = deps.envDestination?.()
-      return json({ ok: true, destinations: env === undefined ? rows : [redact(env, { hasToken: true, readOnly: true }), ...rows] })
+      return json({
+        ok: true,
+        destinations: env === undefined ? rows : [redact(env, { hasToken: true, readOnly: true }), ...rows],
+        // What the process is actually doing right now. This deployment has no
+        // logger, so without it a broadcast that quietly wired nothing looks
+        // identical to one that works.
+        runtime: deps.runtime?.() ?? {},
+      })
     },
 
     /** Check a token before storing it, and report who it belongs to. */
@@ -93,10 +105,11 @@ export function createHandlers(deps) {
         if (!list.some((d) => d.id === id)) return fail('no such bot', 404)
         token = await withToken(id)
       }
-      // A running poller is the bot's only `getUpdates` consumer — asking
+      // A running listener is the bot's only `getUpdates` consumer — asking
       // Telegram again would answer with the nothing it already handed over —
-      // so what it has seen is the authoritative list while it runs.
-      const cached = deps.seenChats?.(token) ?? []
+      // so what it has seen is the authoritative list while it runs. A token
+      // typed into the add form has no listener, so that path still asks.
+      const cached = raw.length > 0 ? [] : (deps.seenChats?.(String(body.id ?? '')) ?? [])
       if (cached.length > 0) return json({ ok: true, chats: cached })
       try {
         const updates = await deps.api(token, 'getUpdates', { limit: 100, timeout: 0 })

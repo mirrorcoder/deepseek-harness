@@ -12,6 +12,32 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.8.1 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+The answering bot from v1.8.0 never actually listened. Three faults, each
+hiding the next:
+
+- The settings block was mounted before the functions it calls were declared,
+  so it threw a temporal-dead-zone error at boot and the broadcast ran with no
+  destinations at all — while the panel kept working, because it calls Telegram
+  directly. It is now mounted last, with a comment saying why.
+- Folding the stored settings section over the plugin configuration used a
+  plain spread, and a key the document does not mention arrives as an explicit
+  `undefined`, which erased the `commands` default. `mergeSection` now skips
+  undefined values.
+- The listener was keyed by the resolved token, but at boot the credential
+  store has not loaded yet, so the token was empty and no listener was ever
+  created — and nothing retried. Listeners are keyed by credential reference
+  and resolve the token inside each round, so a late store just makes the first
+  round fail and the next one succeed.
+
+This deployment has no logger, so all three were invisible. The panel's state
+route now reports what the process is really doing — live destinations, running
+listeners, whether commands are on, and the last error — and each row says
+whether its bot can answer (`listening`, `conflict`, `no-token`, `off`).
+
 ## v1.8.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.
