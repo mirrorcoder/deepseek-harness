@@ -12,6 +12,37 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.10.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Workspaces, sessions and Telegram now describe the same structure.
+
+- **A thread is a session, its colour is the project.** Topics are named
+  `project · subject` and coloured from a stable hash of the workspace path, so
+  threads of one repository look alike in the list. A thread that opens before
+  the session has a subject is renamed the moment it earns one.
+- **`/sessions` is grouped by project**, numbered continuously, marking what is
+  running — the sidebar, in a message.
+- **`/new` takes a project**: `/new 2` by number from `/workspaces`, `/new site`
+  by name, `/new /abs/path` for anywhere else. An unknown name creates nothing
+  and says so.
+- `/start` now explains the model in three steps instead of printing a chat id.
+- Without threads (a private chat whose owner has not turned Threaded Mode on in
+  @BotFather) every line carries its session's name, so two sessions no longer
+  interleave into an unreadable stream.
+
+### Fixed
+
+- A crash on boot: the control wiring named a function declared below it, and
+  reading it during initialisation threw, which took the whole harness down —
+  the site answered 502 until the container restarted into the same fault. The
+  reference is lazy now. This is the second temporal-dead-zone fault in this
+  file; both are commented where they happened.
+- The claim that a private chat holds topics out of the box was wrong: Telegram
+  refuses with "the chat is not a forum" until Threaded Mode is enabled for the
+  bot. Documented where it matters.
+
 ## v1.9.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

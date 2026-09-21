@@ -3,6 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Bindings, formatSessions, formatWorkspaces, handleMessage } from './control.js'
+import { workspaceOf } from './topics.js'
 
 const NOW = 1_700_000_000_000
 const items = [
@@ -17,7 +18,11 @@ function harness(overrides = {}) {
     now: () => NOW,
     status: () => 'одна цель',
     sessions: async () => items,
-    workspaces: () => [{ name: 'harness', path: '/workspace/deepseek-harness', sessions: 2 }],
+    workspaces: () => [
+      { name: 'harness', path: '/workspace/deepseek-harness', sessions: 2 },
+      { name: 'site', path: '/workspace/projects/site', sessions: 1 },
+    ],
+    workspaceOf,
     create: async (cwd) => { calls.creates.push(cwd); return 'cccccccc-3333' },
     prompt: async (sessionId, text) => { calls.prompts.push({ sessionId, text }) },
     cancel: (sessionId) => { calls.cancels.push(sessionId) },
@@ -28,15 +33,24 @@ function harness(overrides = {}) {
 
 const say = (deps, text, extra = {}) => handleMessage({ text, chatId: '7', ...extra }, deps)
 
-test('the session list is numbered, marks the running one and reads like a list', async () => {
-  const text = formatSessions(items, { now: NOW })
-  assert.match(text, /1\. ▶ Fix the login bug · workspace\/deepseek-harness · только что/)
-  assert.match(text, /2\. · bbbbbbbb · projects\/site · 3 ч назад/)
+test('the session list groups by project, numbers continuously and marks the running one', () => {
+  const workspaces = [
+    { name: 'harness', path: '/workspace/deepseek-harness' },
+    { name: 'site', path: '/workspace/projects/site' },
+  ]
+  const text = formatSessions(items, { now: NOW, workspaces, workspaceOf })
+  assert.match(text, /📁 harness\n  1\. ▶ Fix the login bug · только что/)
+  assert.match(text, /📁 site\n  2\. · bbbbbbbb · 3 ч назад/)
+  assert.match(text, /\/use N/)
   assert.match(formatSessions([]), /Сессий пока нет/)
+  // a session outside every registered workspace still shows up, under its own directory
+  const orphan = formatSessions([{ sessionId: 'x', updatedAt: NOW, running: false, cwd: '/tmp/scratch' }], { now: NOW, workspaces, workspaceOf })
+  assert.match(orphan, /📁 scratch/)
 })
 
 test('workspaces list paths and session counts', () => {
-  assert.match(formatWorkspaces([{ name: 'harness', path: '/w/h', sessions: 2 }]), /1\. harness · \/w\/h · сессий: 2/)
+  assert.match(formatWorkspaces([{ name: 'harness', path: '/w/h', sessions: 2 }]), /1\. 📁 harness · \/w\/h · сессий: 2/)
+  assert.match(formatWorkspaces([{ path: '/w/unnamed' }]), /📁 unnamed/)
   assert.match(formatWorkspaces([]), /Воркспейсов нет/)
 })
 
@@ -77,14 +91,20 @@ test('unbound plain text explains itself instead of vanishing', async () => {
   assert.deepEqual(calls.prompts, [])
 })
 
-test('/new creates, binds, and accepts a path', async () => {
+test('/new takes a workspace by number, by name or by path, and binds the chat', async () => {
   const { deps, calls } = harness()
-  assert.match(await say(deps, '/new'), /Новая сессия/)
-  assert.deepEqual(calls.creates, [undefined])
+  assert.match(await say(deps, '/new'), /Сессия создана/)
+  assert.deepEqual(calls.creates, [undefined], 'bare /new uses where the harness stands')
   assert.equal(await say(deps, 'поехали'), undefined)
   assert.deepEqual(calls.prompts, [{ sessionId: 'cccccccc-3333', text: 'поехали' }])
-  await say(deps, '/new /workspace/projects/site')
-  assert.deepEqual(calls.creates[1], '/workspace/projects/site')
+  await say(deps, '/new 2')
+  assert.equal(calls.creates[1], '/workspace/projects/site', 'by number from /workspaces')
+  await say(deps, '/new HARNESS')
+  assert.equal(calls.creates[2], '/workspace/deepseek-harness', 'by name, case-insensitively')
+  await say(deps, '/new /tmp/elsewhere')
+  assert.equal(calls.creates[3], '/tmp/elsewhere', 'an absolute path is taken as is')
+  assert.match(await say(deps, '/new нетакого'), /Не нашёл воркспейс/)
+  assert.equal(calls.creates.length, 4, 'an unknown name creates nothing')
 })
 
 test('/stop cancels the bound session and says so when there is none', async () => {
@@ -100,7 +120,8 @@ test('/start and /help teach the whole grammar; an unknown command does too', as
   const { deps } = harness()
   const start = await say(deps, '/start')
   assert.match(start, /chat id: 7/)
-  assert.match(start, /\/sessions/)
+  assert.match(start, /\/workspaces/)
+  assert.match(start, /свой тред/)
   assert.match(await say(deps, '/help'), /\/use N/)
   assert.match(await say(deps, '/nope'), /Не знаю команду \/nope/)
   assert.equal(await say(deps, '/ID'), 'chat id: 7')

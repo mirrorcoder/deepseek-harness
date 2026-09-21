@@ -1,12 +1,15 @@
 // dsh-ext-telegram — live broadcast of every session into Telegram, managed
 // from inside the harness.
 //
-// One session becomes one topic (thread) in each configured chat, so the phone
-// shows the same structure as the sidebar: the ask, what the agent answered,
-// which tools it reached for, anything it is blocked on, and how long the run
-// took. Telegram lets a bot open topics inside a private chat, so the target
-// can be the operator's own chat with the bot; a forum supergroup behaves the
-// same. A chat without topics falls back to plain prefixed messages.
+// One session becomes one topic (thread), named `project · subject` and
+// coloured by project, so the thread list reads like the sidebar: the ask, what
+// the agent answered, which tools it reached for, anything it is blocked on,
+// and how long the run took, all inside that session's own thread.
+//
+// A private chat with the bot can hold topics ONLY after its owner turns
+// Threaded Mode on in @BotFather; before that Telegram answers "the chat is not
+// a forum" and this falls back to one flat conversation where every line
+// carries its session's name. A forum supergroup works without that switch.
 //
 // Bots are added from the page: the ✈ button opens a panel that talks to this
 // extension's own routes, which sit inside the harness authentication fence.
@@ -28,6 +31,7 @@ import { createHandlers, dispatch } from './routes.js'
 import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
 import { Bindings, handleMessage } from './control.js'
+import { topicSpec, topicName, workspaceOf } from './topics.js'
 
 export const name = 'ext-telegram'
 
@@ -143,6 +147,17 @@ export function apply(ctx, initial) {
     syncPollers()
   }
 
+  /** Registered workspaces, as both the control and the topic naming see them. */
+  const listWorkspaces = () => {
+    const registry = ctx.get('workspaceRegistry')
+    if (registry === undefined) return []
+    try {
+      return registry.list().map((w) => ({ name: w.name, path: w.path, sessions: w.sessionIds?.length }))
+    } catch {
+      return []
+    }
+  }
+
   // ── the remote control ────────────────────────────────────────────────────
   /** `chatId:threadId` → session id, so a reply in a thread lands in its session. */
   const threadSessions = new Map()
@@ -150,7 +165,10 @@ export function apply(ctx, initial) {
 
   const controlDeps = {
     bindings,
-    status: statusLine,
+    // Lazy on purpose: `statusLine` is declared below, and naming it directly
+    // here reads it during initialisation — the temporal-dead-zone crash that
+    // took the whole harness down once already.
+    status: () => statusLine(),
     sessions: async () => {
       const controller = ctx.get('sessionController')
       if (controller === undefined) throw new Error('session controller is not mounted')
@@ -160,11 +178,8 @@ export function apply(ctx, initial) {
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, 10)
     },
-    workspaces: () => {
-      const registry = ctx.get('workspaceRegistry')
-      if (registry === undefined) return []
-      return registry.list().map((w) => ({ name: w.name, path: w.path, sessions: w.sessionIds?.length }))
-    },
+    workspaces: () => listWorkspaces(),
+    workspaceOf,
     create: async (cwd) => {
       const controller = ctx.get('sessionController')
       if (controller === undefined) throw new Error('session controller is not mounted')
@@ -339,7 +354,14 @@ export function apply(ctx, initial) {
     for (const target of targets.values()) {
       if (line.kind === 'tool' && target.destination.tools === 'off') continue
       if (target.destination.mode === 'summary' && !SUMMARY_KINDS.has(line.kind)) continue
-      if (line.kind === 'title') stateFor(target, session).label = topicTitle(event.data.title)
+      if (line.kind === 'title') {
+        const state = stateFor(target, session)
+        const named = topicName(state.workspace ?? workspaceOf(session.header?.cwd ?? session.cwd, listWorkspaces()), event.data.title)
+        state.label = named
+        // A thread that opened as "project · новая сессия" becomes the real
+        // subject the moment the session earns one.
+        if (state.threadId !== undefined) void clientFor(target).then((c) => c?.renameTopic(state.threadId, named))
+      }
       send(target, session, line.text, line.kind === 'user' ? line.text.replace(/^👤\s*/, '') : undefined)
     }
   })
@@ -348,13 +370,18 @@ export function apply(ctx, initial) {
   const broadcastTo = (target, client, session, text, seed) => {
     const state = stateFor(target, session)
     if (!target.topicsUsable) {
-      client.post(state.announced ? text : `[${state.label}]\n${text}`)
+      // Without threads every session lands in one flat conversation, so each
+      // line carries its session's name — otherwise two sessions interleave
+      // into an unreadable stream.
+      client.post(`[${state.label}] ${text}`)
       state.announced = true
       return
     }
     if (state.threadId === undefined && state.opening === undefined) {
-      state.label = topicTitle(seed ?? state.label)
-      state.opening = client.createTopic(state.label).then((id) => {
+      const spec = topicSpec({ cwd: session.header?.cwd ?? session.cwd, title: seed }, listWorkspaces())
+      state.label = spec.name
+      state.workspace = spec.workspace
+      state.opening = client.createTopic(spec.name, spec.iconColor).then((id) => {
         state.threadId = id
         if (id === undefined) target.topicsUsable = false
         // Remember which session a thread belongs to, so a reply typed inside

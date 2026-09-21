@@ -3,16 +3,16 @@
 // harness, a network or a bot.
 
 const HELP = [
-  'Что я понимаю:',
-  '/sessions — список сессий, каждая с номером',
-  '/use N — привязать этот чат к сессии N',
-  '/new [путь] — новая сессия (в воркспейсе по пути, иначе в текущем)',
-  '/workspaces — воркспейсы',
+  'Команды:',
+  '/workspaces — проекты, подключённые к харнессу',
+  '/sessions — сессии, сгруппированные по проектам',
+  '/new [проект] — новая сессия: номер или имя из /workspaces, либо путь',
+  '/use N — писать в сессию N из этого чата',
   '/stop — прервать текущий ход',
   '/status — куда настроена трансляция',
   '/id — chat id',
   '',
-  'Обычный текст уходит в привязанную сессию. В треде сессии ничего привязывать не нужно — пиши прямо там.',
+  'Обычный текст уходит в выбранную сессию. В треде сессии выбирать ничего не нужно — пиши прямо там.',
 ].join('\n')
 
 /** `123` → 123, anything else → undefined. */
@@ -20,23 +20,43 @@ function positiveInt(word) {
   return /^\d+$/.test(String(word ?? '')) ? Number(word) : undefined
 }
 
+function ago(now, then) {
+  // Floor, not round: anything inside the last minute is "just now", and
+  // rounding turned a 30-second-old session into "1 min ago".
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000))
+  if (minutes < 1) return 'только что'
+  if (minutes < 60) return `${minutes} мин назад`
+  const hours = Math.floor(minutes / 60)
+  return hours < 24 ? `${hours} ч назад` : `${Math.floor(hours / 24)} дн назад`
+}
+
+/**
+ * Sessions grouped by the workspace they live in, numbered continuously so one
+ * `/use N` addresses any of them. The grouping is the point: the list reads
+ * like the sidebar rather than like a log.
+ */
 export function formatSessions(items, options = {}) {
-  if (items.length === 0) return 'Сессий пока нет. /new — создать.'
+  if (items.length === 0) return 'Сессий пока нет.\n/new — создать первую.'
   const now = options.now ?? Date.now()
-  const lines = items.map((item, index) => {
-    // Floor, not round: anything inside the last minute is "just now", and
-    // rounding turned a 30-second-old session into "1 min ago".
-    const age = Math.max(0, Math.floor((now - item.updatedAt) / 60_000))
-    const when = age < 1 ? 'только что' : age < 60 ? `${age} мин назад` : `${Math.round(age / 60)} ч назад`
-    const where = item.cwd === undefined ? '' : ` · ${item.cwd.split('/').slice(-2).join('/')}`
-    return `${index + 1}. ${item.running ? '▶' : '·'} ${item.title ?? item.sessionId.slice(0, 8)}${where} · ${when}`
+  const workspaces = options.workspaces ?? []
+  const groups = new Map()
+  items.forEach((item, index) => {
+    const workspace = options.workspaceOf?.(item.cwd, workspaces)
+    const key = workspace?.path ?? item.cwd ?? '—'
+    const title = workspace?.name ?? (key === '—' ? 'без папки' : key.split('/').filter(Boolean).pop())
+    if (!groups.has(key)) groups.set(key, { title, rows: [] })
+    groups.get(key).rows.push(
+      `  ${index + 1}. ${item.running ? '▶' : '·'} ${item.title ?? item.sessionId.slice(0, 8)} · ${ago(now, item.updatedAt)}`,
+    )
   })
-  return [...lines, '', '/use N — писать в неё отсюда'].join('\n')
+  const blocks = [...groups.values()].map((group) => [`📁 ${group.title}`, ...group.rows].join('\n'))
+  return [...blocks, '', '/use N — писать в сессию отсюда. В треде сессии выбирать ничего не нужно.'].join('\n')
 }
 
 export function formatWorkspaces(list) {
-  if (list.length === 0) return 'Воркспейсов нет. /new <путь> — создать сессию в папке.'
-  return list.map((w, i) => `${i + 1}. ${w.name ?? w.path.split('/').pop()} · ${w.path}${w.sessions === undefined ? '' : ` · сессий: ${w.sessions}`}`).join('\n')
+  if (list.length === 0) return 'Воркспейсов нет.\n/new <путь> — создать сессию в папке.'
+  const rows = list.map((w, i) => `${i + 1}. 📁 ${w.name ?? w.path.split('/').filter(Boolean).pop()} · ${w.path}${w.sessions === undefined ? '' : ` · сессий: ${w.sessions}`}`)
+  return [...rows, '', '/new N — новая сессия в воркспейсе N'].join('\n')
 }
 
 /**
@@ -98,15 +118,27 @@ export async function handleMessage(message, deps) {
       return deps.status()
     case '/start':
       return [
-        'Готово — этот чат теперь виден харнессу.',
-        `chat id: ${message.chatId}`,
+        'Это пульт от харнесса.',
         '',
-        HELP,
+        'Каждая сессия получает здесь свой тред: в нём видно вопрос, ответ, каждый инструмент, запросы подтверждения и итог с временем и расходом токенов. Цвет треда — это проект, так что ветки одного репозитория выглядят одинаково.',
+        '',
+        'С чего начать:',
+        '1. /workspaces — какие проекты подключены',
+        '2. /new 1 — новая сессия в первом из них',
+        '3. напиши задачу обычным текстом',
+        '',
+        'Дальше отвечай прямо в треде сессии — выбирать ничего не нужно.',
+        '',
+        `chat id: ${message.chatId}`,
       ].join('\n')
     case '/sessions': {
       const items = await deps.sessions()
       bindings.remember(message.chatId, message.threadId, items.map((i) => i.sessionId))
-      return formatSessions(items, { now: deps.now?.() })
+      return formatSessions(items, {
+        now: deps.now?.(),
+        workspaces: deps.workspaces(),
+        workspaceOf: deps.workspaceOf,
+      })
     }
     case '/workspaces':
       return formatWorkspaces(deps.workspaces())
@@ -119,9 +151,25 @@ export async function handleMessage(message, deps) {
       return `Готово: пишу в сессию ${n}. Просто отправь текст.`
     }
     case '/new': {
-      const sessionId = await deps.create(argument.length > 0 ? argument : undefined)
+      // `/new` — where the harness stands; `/new 2` — the second workspace;
+      // `/new site` — by name; `/new /abs/path` — anywhere.
+      let cwd
+      if (argument.length > 0) {
+        const workspaces = deps.workspaces()
+        const byNumber = positiveInt(argument)
+        const chosen = byNumber !== undefined
+          ? workspaces[byNumber - 1]
+          : workspaces.find((w) => (w.name ?? '').toLowerCase() === argument.toLowerCase())
+        if (chosen !== undefined) cwd = chosen.path
+        else if (argument.startsWith('/')) cwd = argument
+        else return `Не нашёл воркспейс «${argument}». /workspaces — список, или укажи путь от корня.`
+      }
+      const sessionId = await deps.create(cwd)
       bindings.bind(message.chatId, message.threadId, sessionId)
-      return `Новая сессия создана${argument ? ` в ${argument}` : ''}. Пиши текст — уйдёт в неё.`
+      return [
+        `Сессия создана${cwd ? ` в ${cwd}` : ''}.`,
+        'Пиши сюда — уйдёт в неё. Как только она заговорит, у неё появится свой тред.',
+      ].join('\n')
     }
     case '/stop': {
       const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)

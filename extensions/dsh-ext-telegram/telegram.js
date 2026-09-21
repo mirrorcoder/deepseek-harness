@@ -55,14 +55,33 @@ export class TelegramClient {
     return body.result
   }
 
-  /** Create a topic (a thread) and return its id, or undefined when unsupported. */
-  async createTopic(name) {
+  /**
+   * Create a topic (a thread) and return its id, or undefined when this chat
+   * cannot hold topics. A private chat can, but only once the bot's owner
+   * turns Threaded Mode on in @BotFather; before that Telegram answers
+   * "the chat is not a forum".
+   */
+  async createTopic(name, iconColor) {
     try {
-      const topic = await this.call('createForumTopic', { chat_id: this.chatId, name })
+      const topic = await this.call('createForumTopic', {
+        chat_id: this.chatId,
+        name,
+        ...(iconColor === undefined ? {} : { icon_color: iconColor }),
+      })
       return topic?.message_thread_id
     } catch (error) {
       this.onError(error)
       return undefined
+    }
+  }
+
+  /** Rename a topic once the session earns a real title; failures are cosmetic. */
+  async renameTopic(threadId, name) {
+    if (threadId === undefined) return
+    try {
+      await this.call('editForumTopic', { chat_id: this.chatId, message_thread_id: threadId, name })
+    } catch (error) {
+      this.onError(error)
     }
   }
 
