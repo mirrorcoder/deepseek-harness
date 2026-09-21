@@ -1,0 +1,12 @@
+# Enabled for this deployment by its owner's decision: ds.jusl.me serves one
+# operator behind TLS, the proxy's own login and the harness session cookie,
+# and that operator needs the Settings pages (models, keys, plugin settings)
+# without forwarding a loopback port first.
+#
+# Set `enabled: false` before sharing the URL with anyone who may talk to the
+# agent but must not edit the harness configuration.
+- insert:
+    - id: ext-remote-console
+      name: dsh-ext-remote-console
+      config:
+        enabled: true

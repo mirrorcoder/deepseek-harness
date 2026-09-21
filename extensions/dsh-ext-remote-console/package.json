@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-remote-console",
+  "version": "0.1.0",
+  "description": "Declare this deployment's authenticated page the operator console, so Settings persist to the harness home instead of the browser tab",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-host-webserver": "*"
+  }
+}

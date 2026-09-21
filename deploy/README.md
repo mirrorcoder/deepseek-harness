@@ -32,6 +32,7 @@ clone it and pull updates.
 | `dsh-ext-compaction-pro` | Compaction engine: structured checkpoint with verbatim user directives + touched-files/commands ledger, MAX_TOKENS retry, map-reduce for over-long spans. | used by the `pro` preset (`$DSH_HOME/.agent-presets/pro`) |
 | `dsh-ext-workspace-picker` | Directory dialog that opens in the workspace, keeps Home anchored there, dims caches/build output, and can show configured `places` as jump rows. Replaces the `directory-picker` row with the browse backend + client surface pair. | its row's `config` in the bundle patch (`defaultPath`, `homeAnchor`, `noise`, `places`) |
 | `dsh-ext-version` | `/version` command and a system-prompt line naming the running build. | `deploy/build-info.json`, baked into the image |
+| `dsh-ext-remote-console` | Declares this deployment's authenticated page an operator console, so the Settings pages persist to the harness home over the public URL instead of the browser tab. Ships off; this deployment's patch turns it on. | `enabled` in its bundle patch |
 
 Each package has a `test.mjs` runnable inside the container with `node --test`
 from `/data/dsh/profiles/web/node_modules/<pkg>/` (deps resolve from the
@@ -48,9 +49,12 @@ profile closure). `update.sh` runs them.
 * **API keys and the Settings UI.** The client offers the privileged surface —
   settings that persist to the harness home, "open configuration file" — only
   when the page authority is loopback, its stand-in for "the operator's own
-  machine". Through the public domain Settings → Models therefore answers
-  *"settings are unavailable in this browser"* and cannot store a key. Two ways
-  to configure a model, both leaving the key on the server:
+  machine". This deployment declares its authenticated page an operator console
+  (`dsh-ext-remote-console`), so **Settings → Models works over the public URL**
+  and stores the key in `/root/dsh-data/data/dsh/.credentials.yaml`.
+  With that extension disabled the pages fall back to the browser tab and
+  report *"settings are unavailable in this browser"*; the two ways to
+  configure a model without them, both leaving the key on the server, are:
   * `deploy/tunnel.sh` prints an SSH port-forward; the forwarded page **is**
     loopback, so the Settings UI works fully and writes
     `/root/dsh-data/data/dsh/.credentials.yaml`. Afterwards the public URL

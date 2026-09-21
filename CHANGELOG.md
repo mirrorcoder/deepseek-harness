@@ -12,6 +12,24 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.3.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Settings work on the public URL** (`dsh-ext-remote-console`). The client
+  offers host-persisted settings only to a page it considers the operator's
+  own, which it infers from a loopback authority. This deployment serves one
+  operator behind TLS, a reverse-proxy login and the harness session cookie,
+  so it declares the page an operator console through one structured
+  index-injection row (`__DSH_TRANSPORT__ = { ownsHost: true }`). Settings →
+  Models can now store an API key over the public URL and no tunnel is needed.
+  No transport hooks are declared, so the page keeps the ordinary HTTP +
+  WebSocket carrier.
+  The package ships `enabled: false`; this deployment's bundle patch turns it
+  on. Turn it back off before sharing the URL with people who may use the
+  agent but must not edit the configuration.
+  `deploy/tunnel.sh` and `deploy/model.sh` from v1.2.0 remain as alternatives.
+
 ## v1.2.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.
