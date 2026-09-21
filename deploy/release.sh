@@ -65,7 +65,7 @@ docker exec dsh kill -TERM 1 || true
 i=0; while [ $i -lt 60 ]; do docker logs --since 120s dsh 2>&1 | grep -q 'token=' && break; i=$((i+1)); sleep 2; done
 
 echo "→ extension tests"
-docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console; do printf "   %-24s " "$p"; node --test "$p/test.mjs" 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
+docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency; do printf "   %-24s " "$p"; node --test "$p/test.mjs" 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
 echo "→ running build:"
 docker exec dsh cat /opt/dsh/build-info.json
 ./login-link.sh

@@ -77,6 +77,22 @@ function fmt(n) {
   return String(n)
 }
 
+/**
+ * The system-prompt text. A pure function of the configuration and one
+ * boolean, so it takes exactly two values per deployment and the provider's
+ * prefix cache survives every request in between.
+ */
+export function stablePolicyText(config, peak) {
+  const budget = peak ? config.peakTokensPerMinute : config.offPeakTokensPerMinute
+  return [
+    `Usage budget: DeepSeek pricing is currently ${peak ? 'PEAK (2x)' : 'off-peak (half price)'}.`,
+    budget > 0
+      ? `This deployment allows about ${fmt(budget)} cost-weighted tokens per ${config.windowSeconds}s; over that a request is declined until the window drains.`
+      : 'No rate budget is set.',
+    'Cached input costs a fraction of fresh input, so keep the early part of the conversation stable: do not re-read files you already read, batch tool calls, ask for narrow file ranges, and keep answers tight.',
+  ].join(' ')
+}
+
 /** The pure core, shared with tests: decide + record on a meter. */
 export function createGuard(getConfig, meter) {
   const state = { declinedCalls: 0, overBudgetSeen: 0, totalBilled: 0, totalWeighted: 0 }
@@ -129,22 +145,22 @@ export function apply(ctx, initial) {
     })
   })
 
-  // 2. System-prompt section so the model itself economises when it matters.
+  // 2. System-prompt section so the model economises by default.
+  //
+  // CACHE HYGIENE: the system prompt is the head of every request, so any text
+  // that differs between two requests invalidates the provider's prefix cache
+  // for the WHOLE conversation behind it — on DeepSeek that turns cache-hit
+  // input (about a thirtieth of the price) into fresh input. This section
+  // therefore carries only facts that change at most a couple of times a day:
+  // the pricing mode and the standing budget. Live counters belong to `/peak`
+  // and `/context`, which the operator reads on demand, and enforcement does
+  // not need the model's cooperation anyway — an over-budget call is declined
+  // with an explicit reason the model then sees.
   ctx.inject(['systemPrompt'], (pctx) => {
     pctx.effect(() => pctx.systemPrompt.section({
       name: 'ext:peak-guard',
       order: 950,
-      text: () => {
-        if (!config.enabled) return ''
-        const s = guard.status()
-        const mode = s.peak ? 'PEAK (2x price)' : 'off-peak (half price)'
-        const until = s.boundary ? ` until ${s.boundary.toISOString().slice(11, 16)} UTC` : ''
-        const lines = [`Usage budget guard: DeepSeek pricing is currently ${mode}${until}. Rolling usage ${fmt(s.used)}/${s.budget > 0 ? fmt(s.budget) : '∞'} cost-weighted tokens per ${config.windowSeconds}s (cache hits count ×${config.weights.cacheRead}, output ×${config.weights.output}).`]
-        if (s.warn) {
-          lines.push('You are near the budget: be economical — batch tool calls, read only the file ranges you need, keep answers tight, avoid re-reading large outputs. Over budget the next request will be declined until the window drains.')
-        }
-        return lines.join(' ')
-      },
+      text: () => (config.enabled ? stablePolicyText(config, guard.status().peak) : ''),
     }))
   })
 

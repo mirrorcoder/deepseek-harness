@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { isPeak, nextBoundary, RollingMeter, DEFAULT_PEAK_WINDOWS } from './schedule.js'
-import { createGuard, billed, weighted } from './index.js'
+import { createGuard, billed, weighted, stablePolicyText } from './index.js'
 
 const W = { input: 1, cacheRead: 0.04, cacheWrite: 1, output: 3 }
 const cfg = (over = {}) => ({
@@ -53,6 +53,24 @@ test('guard: declines over budget during peak, warns first, ignores other provid
   assert.match(err.message, /PEAK hours/)
   assert.equal(g.check('anthropic', peakNow), undefined)         // provider filter
   assert.equal(g.state.declinedCalls, 1)
+})
+
+test('cache hygiene: the system-prompt text does not move with usage', () => {
+  // The prompt is the head of every request; text that differs between two
+  // requests invalidates the provider prefix cache for the whole conversation.
+  const c = cfg()
+  const before = stablePolicyText(c, true)
+  const meter = new RollingMeter(60_000)
+  const g = createGuard(() => c, meter)
+  g.record({ inputTokens: 900, outputTokens: 100 })
+  g.record({ inputTokens: 50, outputTokens: 10 })
+  assert.equal(stablePolicyText(c, true), before, 'usage must not appear in the prompt')
+  // only the pricing mode moves it, and that happens twice a day
+  assert.notEqual(stablePolicyText(c, false), before)
+  assert.match(before, /PEAK \(2x\)/)
+  assert.match(stablePolicyText(c, false), /off-peak/)
+  assert.match(before, /do not re-read files you already read/)
+  assert.equal(stablePolicyText({ ...c, peakTokensPerMinute: 0 }, true).includes('No rate budget'), true)
 })
 
 test('guard: off-peak budget is separate; action=warn never declines; disabled is transparent', () => {

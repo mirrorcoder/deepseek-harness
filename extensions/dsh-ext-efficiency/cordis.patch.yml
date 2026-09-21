@@ -1,0 +1,8 @@
+# Host-plane row: the tool pipeline, the model-call waterfall and the /context
+# command are all process-wide, so every agent preset gets this for free.
+- insert:
+    - id: ext-efficiency
+      name: dsh-ext-efficiency
+      config:
+        dedup: true
+        minChars: 1500

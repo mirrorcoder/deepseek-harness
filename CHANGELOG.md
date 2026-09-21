@@ -12,6 +12,32 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.4.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Token efficiency, and the numbers to see it working.
+
+- **Prefix-cache hygiene (the big one).** The usage-guard section of the system
+  prompt carried live counters, and the system prompt is the head of every
+  request: text that differs between two requests invalidates the provider's
+  prefix cache for the whole conversation behind it. On DeepSeek that turns
+  cache-hit input, priced at roughly a thirtieth of fresh input, into fresh
+  input on every single turn. The section now carries only the pricing mode
+  and the standing budget, which move at most twice a day; live counters live
+  in `/peak` and `/context`. A regression test asserts the text does not move
+  with usage.
+- **Content-hash dedup** (`dsh-ext-efficiency`). A call that repeats both the
+  tool and its exact arguments, and whose result hashes to what that same call
+  returned before, is replaced with a one-line pointer naming the earlier call,
+  its digest and a short preview. A result whose output moved never matches its
+  own hash and is always delivered in full, and a pointer that would not be
+  decisively smaller than the text is not used at all.
+- **`/context`** — window occupancy with a bar and the compaction threshold
+  marked, tokens left before this session condenses, the active route, the
+  cache-hit ratio, cost-weighted tokens saved by the cache, and how much dedup
+  kept off the wire.
+
 ## v1.3.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

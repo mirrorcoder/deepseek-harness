@@ -1,0 +1,16 @@
+{
+  "name": "dsh-ext-efficiency",
+  "version": "0.1.0",
+  "description": "Content-hash dedup of repeated tool results, prefix-cache accounting, and a /context command showing window occupancy and what the tokens were spent on",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "dedup.js", "report.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}
