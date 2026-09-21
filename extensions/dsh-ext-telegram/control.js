@@ -1,18 +1,23 @@
-// The remote control: what a message from Telegram means and what to answer.
-// Dependencies are injected, so the whole grammar is testable without a
+// The remote control: what a message or a tapped button means, and what to
+// answer. Dependencies are injected, so the whole grammar is testable without a
 // harness, a network or a bot.
+//
+// The grammar is deliberately thin. Typing a task is the main path: with no
+// session chosen the bridge opens one and gets to work, because being told to
+// run `/sessions` and then `/use 2` before anything happens is a ritual, not an
+// interface. Everything else is a button.
 
 const HELP = [
-  'Команды:',
-  '/workspaces — проекты, подключённые к харнессу',
-  '/sessions — сессии, сгруппированные по проектам',
-  '/new [проект] — новая сессия: номер или имя из /workspaces, либо путь',
-  '/use N — писать в сессию N из этого чата',
-  '/stop — прервать текущий ход',
-  '/status — куда настроена трансляция',
-  '/id — chat id',
+  'Просто напиши задачу — я открою сессию и начну.',
   '',
-  'Обычный текст уходит в выбранную сессию. В треде сессии выбирать ничего не нужно — пиши прямо там.',
+  'Кнопки и команды:',
+  '/sessions — список сессий, выбор по нажатию',
+  '/workspaces — проекты, новая сессия по нажатию',
+  '/new [проект] — новая сессия сразу',
+  '/stop — прервать текущий ход',
+  '/status — состояние трансляции',
+  '',
+  'В треде сессии ничего выбирать не нужно: что напишешь, уйдёт в неё.',
 ].join('\n')
 
 /** `123` → 123, anything else → undefined. */
@@ -30,38 +35,61 @@ function ago(now, then) {
   return hours < 24 ? `${hours} ч назад` : `${Math.floor(hours / 24)} дн назад`
 }
 
-/**
- * Sessions grouped by the workspace they live in, numbered continuously so one
- * `/use N` addresses any of them. The grouping is the point: the list reads
- * like the sidebar rather than like a log.
- */
-export function formatSessions(items, options = {}) {
-  if (items.length === 0) return 'Сессий пока нет.\n/new — создать первую.'
-  const now = options.now ?? Date.now()
-  const workspaces = options.workspaces ?? []
-  const groups = new Map()
-  items.forEach((item, index) => {
-    const workspace = options.workspaceOf?.(item.cwd, workspaces)
-    const key = workspace?.path ?? item.cwd ?? '—'
-    const title = workspace?.name ?? (key === '—' ? 'без папки' : key.split('/').filter(Boolean).pop())
-    if (!groups.has(key)) groups.set(key, { title, rows: [] })
-    groups.get(key).rows.push(
-      `  ${index + 1}. ${item.running ? '▶' : '·'} ${item.title ?? item.sessionId.slice(0, 8)} · ${ago(now, item.updatedAt)}`,
-    )
-  })
-  const blocks = [...groups.values()].map((group) => [`📁 ${group.title}`, ...group.rows].join('\n'))
-  return [...blocks, '', '/use N — писать в сессию отсюда. В треде сессии выбирать ничего не нужно.'].join('\n')
+function projectOf(item, deps) {
+  const workspace = deps.workspaceOf?.(item.cwd, deps.workspaces?.() ?? [])
+  if (workspace !== undefined) return workspace.name ?? workspace.path.split('/').filter(Boolean).pop()
+  return item.cwd === undefined ? undefined : item.cwd.split('/').filter(Boolean).pop()
 }
 
-export function formatWorkspaces(list) {
-  if (list.length === 0) return 'Воркспейсов нет.\n/new <путь> — создать сессию в папке.'
-  const rows = list.map((w, i) => `${i + 1}. 📁 ${w.name ?? w.path.split('/').filter(Boolean).pop()} · ${w.path}${w.sessions === undefined ? '' : ` · сессий: ${w.sessions}`}`)
-  return [...rows, '', '/new N — новая сессия в воркспейсе N'].join('\n')
+/** Button label for one session: what it is, where it lives, whether it runs. */
+export function sessionLabel(item, deps, now) {
+  const project = projectOf(item, deps)
+  const title = item.title ?? `сессия ${String(item.sessionId).slice(0, 6)}`
+  return `${item.running ? '▶ ' : ''}${project ? `${project} · ` : ''}${title} · ${ago(now, item.updatedAt)}`.slice(0, 64)
 }
 
+/** The sessions screen: one button per session, plus a way to start a new one. */
+export function sessionsScreen(items, deps, now = Date.now()) {
+  if (items.length === 0) {
+    return {
+      text: 'Сессий пока нет. Напиши задачу — открою первую.',
+      keyboard: [[{ text: '＋ Новая сессия', callback_data: 'new' }]],
+    }
+  }
+  return {
+    text: `Выбери сессию — дальше пиши сюда обычным текстом.\nВсего: ${items.length}`,
+    keyboard: [
+      ...items.map((item) => [{ text: sessionLabel(item, deps, now), callback_data: `pick:${item.sessionId}` }]),
+      [{ text: '＋ Новая сессия', callback_data: 'new' }],
+    ],
+  }
+}
+
+/** The projects screen: tapping one starts a session in it. */
+export function workspacesScreen(list) {
+  if (list.length === 0) {
+    return {
+      text: 'Воркспейсов нет. Напиши задачу — открою сессию там, где стоит харнесс.',
+      keyboard: [[{ text: '＋ Новая сессия', callback_data: 'new' }]],
+    }
+  }
+  return {
+    text: 'Проекты. Нажми — открою в нём новую сессию.',
+    keyboard: list.map((workspace, index) => [{
+      text: `📁 ${(workspace.name ?? workspace.path.split('/').filter(Boolean).pop() ?? '').slice(0, 40)}${workspace.sessions ? ` · ${workspace.sessions}` : ''}`,
+      callback_data: `new:${index}`,
+    }]),
+  }
+}
+
+const HOME_KEYBOARD = [[
+  { text: '🗂 Мои сессии', callback_data: 'list' },
+  { text: '＋ Новая', callback_data: 'new' },
+]]
+
 /**
- * One chat's view of the harness: which session it writes to, and what the
- * numbers in the last listing meant.
+ * One chat's view of the harness: which session it writes to, and what the last
+ * listing meant.
  */
 export class Bindings {
   constructor() {
@@ -93,13 +121,17 @@ export class Bindings {
   }
 }
 
+/** Start a session, remember it for this chat, and report it. */
+async function openSession(message, deps, cwd) {
+  const sessionId = await deps.create(cwd)
+  deps.bindings.bind(message.chatId, message.threadId, sessionId)
+  deps.adopt?.(message.chatId, message.threadId, sessionId)
+  return sessionId
+}
+
 /**
  * Interpret one incoming message.
- * @param {{text: string, chatId: string, threadId?: number, threadSession?: string}} message
- * @param {{bindings: Bindings, sessions: () => Promise<object[]>, workspaces: () => object[],
- *          create: (cwd?: string) => Promise<string>, prompt: (sessionId: string, text: string) => Promise<void>,
- *          cancel: (sessionId: string) => void, status: () => string, now?: () => number}} deps
- * @returns {Promise<string | undefined>} what to reply, or undefined to stay silent
+ * @returns {Promise<undefined | string | {text: string, keyboard?: object[][]}>}
  */
 export async function handleMessage(message, deps) {
   const text = String(message.text ?? '').trim()
@@ -111,48 +143,41 @@ export async function handleMessage(message, deps) {
 
   switch (command) {
     case '/help':
-      return HELP
+      return { text: HELP, keyboard: HOME_KEYBOARD }
     case '/id':
       return `chat id: ${message.chatId}`
     case '/status':
       return deps.status()
     case '/start':
-      return [
-        'Это пульт от харнесса.',
-        '',
-        'Каждая сессия получает здесь свой тред: в нём видно вопрос, ответ, каждый инструмент, запросы подтверждения и итог с временем и расходом токенов. Цвет треда — это проект, так что ветки одного репозитория выглядят одинаково.',
-        '',
-        'С чего начать:',
-        '1. /workspaces — какие проекты подключены',
-        '2. /new 1 — новая сессия в первом из них',
-        '3. напиши задачу обычным текстом',
-        '',
-        'Дальше отвечай прямо в треде сессии — выбирать ничего не нужно.',
-        '',
-        `chat id: ${message.chatId}`,
-      ].join('\n')
+      return {
+        text: [
+          'Это пульт от харнесса.',
+          '',
+          'Напиши задачу — я открою сессию и начну работать. У каждой сессии здесь свой тред: в нём виден ответ, который пишется на глазах, что агент делает прямо сейчас, и итог с временем и расходом токенов. Цвет треда — это проект.',
+          '',
+          'Отвечай прямо в треде — выбирать ничего не нужно.',
+        ].join('\n'),
+        keyboard: HOME_KEYBOARD,
+      }
     case '/sessions': {
       const items = await deps.sessions()
-      bindings.remember(message.chatId, message.threadId, items.map((i) => i.sessionId))
-      return formatSessions(items, {
-        now: deps.now?.(),
-        workspaces: deps.workspaces(),
-        workspaceOf: deps.workspaceOf,
-      })
+      bindings.remember(message.chatId, message.threadId, items.map((item) => item.sessionId))
+      return sessionsScreen(items, deps, deps.now?.() ?? Date.now())
     }
     case '/workspaces':
-      return formatWorkspaces(deps.workspaces())
+      return workspacesScreen(deps.workspaces())
     case '/use': {
+      // Kept for muscle memory; the list is buttons now.
       const n = positiveInt(rest[0])
-      if (n === undefined) return 'Номер сессии: /use 1. Список — /sessions.'
+      if (n === undefined) return { text: 'Выбери сессию кнопкой.', keyboard: HOME_KEYBOARD }
       const sessionId = bindings.numbered(message.chatId, message.threadId, n)
-      if (sessionId === undefined) return 'Сначала /sessions, потом /use N из этого списка.'
+      if (sessionId === undefined) return { text: 'Этого номера нет в последнем списке.', keyboard: HOME_KEYBOARD }
       bindings.bind(message.chatId, message.threadId, sessionId)
       deps.adopt?.(message.chatId, message.threadId, sessionId)
-      return `Готово: пишу в сессию ${n}. Просто отправь текст.`
+      return 'Готово. Пиши текст — уйдёт в неё.'
     }
     case '/new': {
-      // `/new` — where the harness stands; `/new 2` — the second workspace;
+      // `/new` — where the harness stands; `/new 2` — the second project;
       // `/new site` — by name; `/new /abs/path` — anywhere.
       let cwd
       if (argument.length > 0) {
@@ -160,35 +185,82 @@ export async function handleMessage(message, deps) {
         const byNumber = positiveInt(argument)
         const chosen = byNumber !== undefined
           ? workspaces[byNumber - 1]
-          : workspaces.find((w) => (w.name ?? '').toLowerCase() === argument.toLowerCase())
+          : workspaces.find((workspace) => (workspace.name ?? '').toLowerCase() === argument.toLowerCase())
         if (chosen !== undefined) cwd = chosen.path
         else if (argument.startsWith('/')) cwd = argument
-        else return `Не нашёл воркспейс «${argument}». /workspaces — список, или укажи путь от корня.`
+        else return { text: `Не нашёл проект «${argument}».`, keyboard: workspacesScreen(deps.workspaces()).keyboard }
       }
-      const sessionId = await deps.create(cwd)
-      bindings.bind(message.chatId, message.threadId, sessionId)
-      deps.adopt?.(message.chatId, message.threadId, sessionId)
-      return [
-        `Сессия создана${cwd ? ` в ${cwd}` : ''}.`,
-        'Пиши сюда — уйдёт в неё. Как только она заговорит, у неё появится свой тред.',
-      ].join('\n')
+      await openSession(message, deps, cwd)
+      return `Сессия открыта${cwd ? ` в ${cwd}` : ''}. Пиши задачу.`
     }
     case '/stop': {
       const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
-      if (sessionId === undefined) return 'Нечего прерывать: сессия не привязана.'
+      if (sessionId === undefined) return 'Нечего прерывать.'
       deps.cancel(sessionId)
       return 'Прервал текущий ход.'
     }
     default: {
-      if (command.startsWith('/')) return `Не знаю команду ${command}.\n\n${HELP}`
-      const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
-      if (sessionId === undefined) {
-        return 'Некуда отправить: сессия не привязана. /sessions → /use N, или /new.'
+      if (command.startsWith('/')) return { text: `Не знаю команду ${command}.\n\n${HELP}`, keyboard: HOME_KEYBOARD }
+      const bound = bindings.resolve(message.chatId, message.threadId, message.threadSession)
+      if (bound !== undefined) {
+        await deps.prompt(bound, text, message)
+        return undefined
       }
+      // Nothing chosen: open a session and start. Asking the operator to run
+      // two commands before the first word of work is the opposite of a chat.
+      const sessionId = await openSession(message, deps)
       await deps.prompt(sessionId, text, message)
       return undefined
     }
   }
 }
 
-export { HELP }
+/**
+ * Interpret one tapped button.
+ * @returns {Promise<{answer?: string, text?: string, keyboard?: object[][], edit?: boolean}>}
+ */
+export async function handleCallback(tap, deps) {
+  const data = String(tap.data ?? '')
+  const message = { chatId: tap.chatId, threadId: tap.threadId }
+
+  if (data === 'list') {
+    const items = await deps.sessions()
+    deps.bindings.remember(tap.chatId, tap.threadId, items.map((item) => item.sessionId))
+    return { ...sessionsScreen(items, deps, deps.now?.() ?? Date.now()), edit: true }
+  }
+
+  if (data === 'new' || data.startsWith('new:')) {
+    let cwd
+    if (data.startsWith('new:')) {
+      const index = positiveInt(data.slice('new:'.length))
+      const workspace = index === undefined ? undefined : deps.workspaces()[index]
+      if (workspace === undefined) return { answer: 'Проект не найден', edit: false }
+      cwd = workspace.path
+    }
+    await openSession(message, deps, cwd)
+    return {
+      answer: 'Сессия открыта',
+      text: `Сессия открыта${cwd ? ` в ${cwd}` : ''}. Напиши задачу — начну.`,
+      edit: true,
+    }
+  }
+
+  if (data.startsWith('pick:')) {
+    const sessionId = data.slice('pick:'.length)
+    deps.bindings.bind(tap.chatId, tap.threadId, sessionId)
+    deps.adopt?.(tap.chatId, tap.threadId, sessionId)
+    const items = await deps.sessions()
+    const chosen = items.find((item) => item.sessionId === sessionId)
+    return {
+      answer: 'Выбрано',
+      text: chosen === undefined
+        ? 'Сессия выбрана. Пиши текст — уйдёт в неё.'
+        : `Пишу в «${sessionLabel(chosen, deps, deps.now?.() ?? Date.now())}».\nОтправь текст.`,
+      edit: true,
+    }
+  }
+
+  return { answer: 'Не понял кнопку' }
+}
+
+export { HELP, HOME_KEYBOARD }

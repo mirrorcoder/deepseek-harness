@@ -2,7 +2,7 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-telegram/test-control.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Bindings, formatSessions, formatWorkspaces, handleMessage } from './control.js'
+import { Bindings, handleCallback, handleMessage, sessionLabel, sessionsScreen, workspacesScreen } from './control.js'
 import { workspaceOf } from './topics.js'
 
 const NOW = 1_700_000_000_000
@@ -33,41 +33,47 @@ function harness(overrides = {}) {
 
 const say = (deps, text, extra = {}) => handleMessage({ text, chatId: '7', ...extra }, deps)
 
-test('the session list groups by project, numbers continuously and marks the running one', () => {
-  const workspaces = [
-    { name: 'harness', path: '/workspace/deepseek-harness' },
-    { name: 'site', path: '/workspace/projects/site' },
-  ]
-  const text = formatSessions(items, { now: NOW, workspaces, workspaceOf })
-  assert.match(text, /📁 harness\n  1\. ▶ Fix the login bug · только что/)
-  assert.match(text, /📁 site\n  2\. · bbbbbbbb · 3 ч назад/)
-  assert.match(text, /\/use N/)
-  assert.match(formatSessions([]), /Сессий пока нет/)
-  // a session outside every registered workspace still shows up, under its own directory
-  const orphan = formatSessions([{ sessionId: 'x', updatedAt: NOW, running: false, cwd: '/tmp/scratch' }], { now: NOW, workspaces, workspaceOf })
-  assert.match(orphan, /📁 scratch/)
+test('the sessions screen is buttons, one per session, plus a way to start one', () => {
+  const deps = harness().deps
+  const screen = sessionsScreen(items, deps, NOW)
+  assert.match(screen.text, /Выбери сессию/)
+  assert.equal(screen.keyboard.length, 3, 'two sessions and the new-session button')
+  assert.equal(screen.keyboard[0][0].callback_data, 'pick:aaaaaaaa-1111')
+  assert.match(screen.keyboard[0][0].text, /▶ harness · Fix the login bug · только что/)
+  assert.equal(screen.keyboard[2][0].callback_data, 'new')
+  const empty = sessionsScreen([], deps, NOW)
+  assert.match(empty.text, /Напиши задачу/)
+  assert.equal(empty.keyboard[0][0].callback_data, 'new')
 })
 
-test('workspaces list paths and session counts', () => {
-  assert.match(formatWorkspaces([{ name: 'harness', path: '/w/h', sessions: 2 }]), /1\. 📁 harness · \/w\/h · сессий: 2/)
-  assert.match(formatWorkspaces([{ path: '/w/unnamed' }]), /📁 unnamed/)
-  assert.match(formatWorkspaces([]), /Воркспейсов нет/)
+test('a button label stays inside the 64 characters Telegram allows', () => {
+  const deps = harness().deps
+  const long = { sessionId: 'x'.repeat(36), updatedAt: NOW, running: true, cwd: '/workspace/deepseek-harness', title: 'з'.repeat(200) }
+  assert.ok(sessionLabel(long, deps, NOW).length <= 64)
 })
 
-test('/sessions then /use binds the chat, and plain text then reaches that session', async () => {
+test('the projects screen starts a session in the tapped project', () => {
+  const screen = workspacesScreen([{ name: 'harness', path: '/w/h', sessions: 2 }, { path: '/w/site' }])
+  assert.match(screen.keyboard[0][0].text, /📁 harness · 2/)
+  assert.equal(screen.keyboard[0][0].callback_data, 'new:0')
+  assert.match(screen.keyboard[1][0].text, /📁 site/)
+  assert.match(workspacesScreen([]).text, /Напиши задачу/)
+})
+
+test('/sessions then /use still works for muscle memory', async () => {
   const { deps, calls } = harness()
   await say(deps, '/sessions')
-  assert.match(await say(deps, '/use 2'), /сессию 2/)
+  assert.match(await say(deps, '/use 2'), /Пиши текст/)
   assert.equal(await say(deps, 'сделай ревью'), undefined, 'a forwarded message needs no reply')
   assert.deepEqual(calls.prompts, [{ sessionId: 'bbbbbbbb-2222', text: 'сделай ревью' }])
 })
 
 test('/use without a listing, or with a number nobody listed, says what to do', async () => {
   const { deps, calls } = harness()
-  assert.match(await say(deps, '/use 1'), /Сначала \/sessions/)
-  assert.match(await say(deps, '/use'), /Номер сессии/)
+  assert.match((await say(deps, '/use 1')).text, /нет в последнем списке/)
+  assert.match((await say(deps, '/use')).text, /кнопкой/)
   await say(deps, '/sessions')
-  assert.match(await say(deps, '/use 99'), /Сначала \/sessions/)
+  assert.match((await say(deps, '/use 99')).text, /нет в последнем списке/)
   assert.deepEqual(calls.prompts, [])
 })
 
@@ -85,15 +91,39 @@ test('a thread binding wins over the chat binding', async () => {
   assert.equal(calls.prompts[0].sessionId, 'aaaaaaaa-1111')
 })
 
-test('unbound plain text explains itself instead of vanishing', async () => {
+test('plain text with nothing chosen opens a session and starts, without a ritual', async () => {
   const { deps, calls } = harness()
-  assert.match(await say(deps, 'привет'), /не привязана/)
-  assert.deepEqual(calls.prompts, [])
+  assert.equal(await say(deps, 'почини вход'), undefined, 'no lecture, no menu — it just works')
+  assert.deepEqual(calls.creates, [undefined])
+  assert.deepEqual(calls.prompts, [{ sessionId: 'cccccccc-3333', text: 'почини вход' }])
+  // and the next message continues that same session rather than opening another
+  await say(deps, 'и тесты')
+  assert.equal(calls.creates.length, 1)
+  assert.deepEqual(calls.prompts.at(-1), { sessionId: 'cccccccc-3333', text: 'и тесты' })
+})
+
+test('tapping a session binds it; tapping "new" opens one; an unknown button says so', async () => {
+  const { deps, calls } = harness()
+  const picked = await handleCallback({ data: 'pick:bbbbbbbb-2222', chatId: '7', messageId: 5 }, deps)
+  assert.equal(picked.answer, 'Выбрано')
+  assert.equal(picked.edit, true)
+  assert.match(picked.text, /Пишу в/)
+  assert.equal(await say(deps, 'давай'), undefined)
+  assert.deepEqual(calls.prompts, [{ sessionId: 'bbbbbbbb-2222', text: 'давай' }])
+
+  const opened = await handleCallback({ data: 'new:1', chatId: '7', messageId: 5 }, deps)
+  assert.equal(opened.answer, 'Сессия открыта')
+  assert.equal(calls.creates.at(-1), '/workspace/projects/site')
+
+  const listed = await handleCallback({ data: 'list', chatId: '7', messageId: 5 }, deps)
+  assert.equal(listed.keyboard[0][0].callback_data, 'pick:aaaaaaaa-1111')
+  assert.equal((await handleCallback({ data: 'нечто', chatId: '7' }, deps)).answer, 'Не понял кнопку')
+  assert.equal((await handleCallback({ data: 'new:99', chatId: '7' }, deps)).answer, 'Проект не найден')
 })
 
 test('/new takes a workspace by number, by name or by path, and binds the chat', async () => {
   const { deps, calls } = harness()
-  assert.match(await say(deps, '/new'), /Сессия создана/)
+  assert.match(await say(deps, '/new'), /Сессия открыта/)
   assert.deepEqual(calls.creates, [undefined], 'bare /new uses where the harness stands')
   assert.equal(await say(deps, 'поехали'), undefined)
   assert.deepEqual(calls.prompts, [{ sessionId: 'cccccccc-3333', text: 'поехали' }])
@@ -103,13 +133,13 @@ test('/new takes a workspace by number, by name or by path, and binds the chat',
   assert.equal(calls.creates[2], '/workspace/deepseek-harness', 'by name, case-insensitively')
   await say(deps, '/new /tmp/elsewhere')
   assert.equal(calls.creates[3], '/tmp/elsewhere', 'an absolute path is taken as is')
-  assert.match(await say(deps, '/new нетакого'), /Не нашёл воркспейс/)
+  assert.match((await say(deps, '/new нетакого')).text, /Не нашёл проект/)
   assert.equal(calls.creates.length, 4, 'an unknown name creates nothing')
 })
 
 test('/stop cancels the bound session and says so when there is none', async () => {
   const { deps, calls } = harness()
-  assert.match(await say(deps, '/stop'), /не привязана/)
+  assert.match(await say(deps, '/stop'), /Нечего прерывать/)
   await say(deps, '/sessions')
   await say(deps, '/use 1')
   assert.match(await say(deps, '/stop'), /Прервал/)
@@ -119,17 +149,17 @@ test('/stop cancels the bound session and says so when there is none', async () 
 test('/start and /help teach the whole grammar; an unknown command does too', async () => {
   const { deps } = harness()
   const start = await say(deps, '/start')
-  assert.match(start, /chat id: 7/)
-  assert.match(start, /\/workspaces/)
-  assert.match(start, /свой тред/)
-  assert.match(await say(deps, '/help'), /\/use N/)
-  assert.match(await say(deps, '/nope'), /Не знаю команду \/nope/)
+  assert.match(start.text, /Напиши задачу/)
+  assert.match(start.text, /свой тред/)
+  assert.equal(start.keyboard[0][0].callback_data, 'list')
+  assert.match((await say(deps, '/help')).text, /\/sessions/)
+  assert.match((await say(deps, '/nope')).text, /Не знаю команду \/nope/)
   assert.equal(await say(deps, '/ID'), 'chat id: 7')
   assert.equal(await say(deps, '/status'), 'одна цель')
 })
 
 test('commands survive the @botname suffix and empty text', async () => {
   const { deps } = harness()
-  assert.match(await say(deps, '/sessions@dsharnebot'), /1\./)
+  assert.match((await say(deps, '/sessions@dsharnebot')).text, /Выбери сессию/)
   assert.equal(await say(deps, '   '), undefined)
 })

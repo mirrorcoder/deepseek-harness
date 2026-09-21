@@ -76,6 +76,15 @@ export class TelegramClient {
     }
   }
 
+  /** Stop the spinner on a tapped button; a failure here is cosmetic. */
+  async answerCallback(callbackId, text) {
+    try {
+      await this.call('answerCallbackQuery', { callback_query_id: callbackId, ...(text === undefined ? {} : { text }) })
+    } catch (error) {
+      this.onError(error)
+    }
+  }
+
   /** Rename a topic once the session earns a real title; failures are cosmetic. */
   async renameTopic(threadId, name) {
     if (threadId === undefined) return
@@ -104,7 +113,14 @@ export class TelegramClient {
         resolve(undefined)
         return
       }
-      this.queue.push({ kind: 'send', text: text.slice(0, TELEGRAM_MAX), threadId, parseMode: options.parseMode ?? 'HTML', resolve })
+      this.queue.push({
+        kind: 'send',
+        text: text.slice(0, TELEGRAM_MAX),
+        threadId,
+        parseMode: options.parseMode ?? 'HTML',
+        keyboard: options.keyboard,
+        resolve,
+      })
       void this.drain()
     })
   }
@@ -121,9 +137,10 @@ export class TelegramClient {
     const pending = this.queue.find((item) => item.kind === 'edit' && item.messageId === messageId)
     if (pending !== undefined) {
       pending.text = body
+      if (options.keyboard !== undefined) pending.keyboard = options.keyboard
       return
     }
-    this.queue.push({ kind: 'edit', messageId, text: body, threadId, parseMode: options.parseMode ?? 'HTML' })
+    this.queue.push({ kind: 'edit', messageId, text: body, threadId, parseMode: options.parseMode ?? 'HTML', keyboard: options.keyboard })
     void this.drain()
   }
 
@@ -155,6 +172,7 @@ export class TelegramClient {
               message_id: item.messageId,
               text: item.text,
               ...(item.parseMode === undefined ? {} : { parse_mode: item.parseMode }),
+              ...(item.keyboard === undefined ? {} : { reply_markup: { inline_keyboard: item.keyboard } }),
               link_preview_options: { is_disabled: true },
             })
             this.edited++
@@ -163,6 +181,7 @@ export class TelegramClient {
               chat_id: this.chatId,
               text: item.text,
               ...(item.parseMode === undefined ? {} : { parse_mode: item.parseMode }),
+              ...(item.keyboard === undefined ? {} : { reply_markup: { inline_keyboard: item.keyboard } }),
               link_preview_options: { is_disabled: true },
               ...(item.threadId === undefined ? {} : { message_thread_id: item.threadId }),
             })

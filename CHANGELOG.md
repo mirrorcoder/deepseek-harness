@@ -12,6 +12,27 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.12.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Talking to the bot no longer requires learning it.
+
+- **Write a task, get work.** With nothing selected the bridge opens a session
+  and sends the prompt straight in. Being told to run `/sessions`, read a
+  numbered list and then type `/use 2` before the first word of work is a
+  ritual, not an interface.
+- **Buttons, not numbers.** `/sessions` answers with one button per session —
+  project, subject, whether it is running, how long ago — plus "＋ Новая
+  сессия". `/workspaces` answers with a button per project that opens a session
+  in it. Tapping edits the same message instead of leaving dead menus behind.
+- **A command menu.** The commands are published to Telegram, so the "/" button
+  next to the input lists them.
+- **Threads survive a restart.** Which thread belongs to which session is
+  persisted in settings. Until now it lived only in memory, so after every
+  deploy a reply inside a session's own thread was answered with "сессия не
+  привязана" — the thread was orphaned while the session was still there.
+
 ## v1.11.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

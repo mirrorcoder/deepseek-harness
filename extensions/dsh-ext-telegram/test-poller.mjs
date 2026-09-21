@@ -2,7 +2,7 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-telegram/test-poller.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chatOf, UpdatePoller } from './poller.js'
+import { callbackOf, chatOf, UpdatePoller } from './poller.js'
 
 const message = (id, text, extra = {}) => ({
   update_id: id,
@@ -75,6 +75,21 @@ test('a reply goes back into the thread it came from', async () => {
   await poller.round()
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(replies, [42])
+})
+
+test('a tapped button is delivered as a callback, not as a message', async () => {
+  const tap = { update_id: 5, callback_query: { id: 'q1', data: 'pick:abc', message: { message_id: 9, message_thread_id: 42, chat: { id: 7 } } } }
+  assert.deepEqual(callbackOf(tap), { id: 'q1', data: 'pick:abc', chatId: '7', threadId: 42, messageId: 9 })
+  assert.equal(callbackOf({ message: { chat: { id: 1 } } }), undefined)
+
+  const { api } = stubApi([[tap]])
+  const taps = []
+  const messages = []
+  const poller = new UpdatePoller({ api, onCallback: (t) => { taps.push(t.data) }, onMessage: async (c) => { messages.push(c); return undefined } })
+  await poller.round()
+  assert.deepEqual(taps, ['pick:abc'])
+  assert.deepEqual(messages, [], 'a tap is not also treated as text')
+  assert.equal(poller.offset, 6)
 })
 
 test('a competing consumer stops the loop instead of fighting it', async () => {

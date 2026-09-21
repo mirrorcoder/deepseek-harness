@@ -30,7 +30,7 @@ import { envDestination, tokenRef } from './destinations.js'
 import { createHandlers, dispatch } from './routes.js'
 import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
-import { Bindings, handleMessage } from './control.js'
+import { Bindings, handleCallback, handleMessage } from './control.js'
 import { topicSpec, topicName, workspaceOf } from './topics.js'
 import { RunView } from './run-view.js'
 
@@ -50,6 +50,16 @@ const Destination = z.object({
 export const Config = z.object({
   /** Destinations; the panel writes these, and they can be edited by hand. */
   destinations: z.array(Destination).default([]),
+  /**
+   * Which Telegram thread belongs to which session. Persisted because a
+   * restart used to orphan every thread: the session kept talking in it, but a
+   * reply landed on "сессия не привязана".
+   */
+  threads: z.array(z.object({
+    chatId: z.string().required(),
+    threadId: z.number().required(),
+    sessionId: z.string().required(),
+  })).default([]),
   /** Show the ✈ button and serve its routes. */
   panel: z.boolean().default(true),
   /**
@@ -265,16 +275,54 @@ export function apply(ctx, initial) {
             chats.delete(chat.id)
             chats.set(chat.id, { id: chat.id, title: chat.title, type: chat.type })
           },
-          reply: (chatId, text, threadId) => {
+          reply: (chatId, answer, threadId) => {
+            const body = typeof answer === 'string' ? { text: answer } : answer
+            if (body?.text === undefined) return
             void (async () => {
               const token = await getToken(ref)
               if (token === undefined || token.length === 0) return
               await callTelegram(token, 'sendMessage', {
                 chat_id: chatId,
-                text,
+                text: body.text,
+                ...(body.keyboard === undefined ? {} : { reply_markup: { inline_keyboard: body.keyboard } }),
                 ...(threadId === undefined ? {} : { message_thread_id: threadId }),
               }).catch(note)
             })()
+          },
+          onCallback: async (tap) => {
+            const token = await getToken(ref)
+            if (token === undefined || token.length === 0) return
+            let outcome = {}
+            try {
+              outcome = await handleCallback(tap, { ...controlDeps, chat: tap })
+            } catch (error) {
+              note(error)
+              outcome = { answer: 'Не получилось' }
+            }
+            await callTelegram(token, 'answerCallbackQuery', {
+              callback_query_id: tap.id,
+              ...(outcome.answer === undefined ? {} : { text: outcome.answer }),
+            }).catch(() => {})
+            if (outcome.text === undefined) return
+            const payload = {
+              chat_id: tap.chatId,
+              text: outcome.text,
+              ...(outcome.keyboard === undefined ? {} : { reply_markup: { inline_keyboard: outcome.keyboard } }),
+            }
+            // Editing the screen the button lives on keeps the chat from
+            // filling with dead menus.
+            if (outcome.edit === true && tap.messageId !== undefined) {
+              await callTelegram(token, 'editMessageText', { ...payload, message_id: tap.messageId })
+                .catch(() => callTelegram(token, 'sendMessage', {
+                  ...payload,
+                  ...(tap.threadId === undefined ? {} : { message_thread_id: tap.threadId }),
+                }).catch(note))
+              return
+            }
+            await callTelegram(token, 'sendMessage', {
+              ...payload,
+              ...(tap.threadId === undefined ? {} : { message_thread_id: tap.threadId }),
+            }).catch(note)
           },
           onMessage: async (chat) => {
             try {
@@ -295,6 +343,7 @@ export function apply(ctx, initial) {
           onOk: () => { lastError = undefined },
         })
         pollers.set(ref, { poller, chats, destinationId })
+        void publishCommandMenu(ref)
         void poller.run()
       }
     } catch (error) {
@@ -355,11 +404,33 @@ export function apply(ctx, initial) {
   }
 
   /** Remember where a session is being talked to, so output joins that thread. */
-  const adoptThread = (chatId, threadId, sessionId) => {
+  const adoptThread = (chatId, threadId, sessionId, persist = true) => {
     if (threadId === undefined || sessionId === undefined) return
+    threadSessions.set(`${chatId}:${threadId}`, sessionId)
     for (const target of targets.values()) {
       if (target.destination.chatId !== String(chatId)) continue
       adoptedThreads.set(`${target.destination.id}:${sessionId}`, threadId)
+    }
+    if (persist) void saveThreads(chatId, threadId, sessionId)
+  }
+
+  /** Write one binding through to settings, keeping the list bounded. */
+  const saveThreads = async (chatId, threadId, sessionId) => {
+    if (scope === undefined) return
+    try {
+      const current = scope.get()?.threads ?? []
+      const without = current.filter((row) => !(String(row.chatId) === String(chatId) && row.threadId === threadId))
+      const next = [...without, { chatId: String(chatId), threadId, sessionId }].slice(-200)
+      await scope.update({ threads: next })
+    } catch (error) {
+      note(error)
+    }
+  }
+
+  /** Restore bindings a restart would otherwise orphan. */
+  const loadThreads = () => {
+    for (const row of scope?.get()?.threads ?? []) {
+      adoptThread(row.chatId, row.threadId, row.sessionId, false)
     }
   }
 
@@ -646,6 +717,7 @@ export function apply(ctx, initial) {
       }))
       config = mergeSection(config, scope.get())
       rebuild()
+      loadThreads()
       ctx.logger?.info?.(`ext-telegram: ${targets.size} destination(s) live`)
     } catch (error) {
       // Boot failures here used to be invisible; the panel now shows them.

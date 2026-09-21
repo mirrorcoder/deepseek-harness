@@ -23,6 +23,20 @@ export function chatOf(update) {
   }
 }
 
+/** A tapped inline button, or undefined when the update is not one. */
+export function callbackOf(update) {
+  const query = update?.callback_query
+  if (query?.id === undefined) return undefined
+  const message = query.message
+  return {
+    id: query.id,
+    data: query.data,
+    chatId: message?.chat?.id === undefined ? undefined : String(message.chat.id),
+    threadId: message?.message_thread_id,
+    messageId: message?.message_id,
+  }
+}
+
 export class UpdatePoller {
   /**
    * @param {{api: (method: string, payload?: object) => Promise<any>,
@@ -37,6 +51,7 @@ export class UpdatePoller {
     this.onChat = o.onChat ?? (() => {})
     this.reply = o.reply ?? (() => {})
     this.onMessage = o.onMessage
+    this.onCallback = o.onCallback
     this.timeout = o.timeout ?? 25
     this.onError = o.onError ?? (() => {})
     /** Called after a round that reached Telegram, so a stale failure can clear. */
@@ -53,12 +68,19 @@ export class UpdatePoller {
     const updates = await this.api('getUpdates', {
       timeout: this.timeout,
       ...(this.offset === undefined ? {} : { offset: this.offset }),
-      allowed_updates: ['message', 'my_chat_member'],
+      allowed_updates: ['message', 'my_chat_member', 'callback_query'],
     })
     this.rounds++
     this.onOk()
     for (const update of Array.isArray(updates) ? updates : []) {
       if (typeof update.update_id === 'number') this.offset = update.update_id + 1
+      const tap = callbackOf(update)
+      if (tap !== undefined) {
+        if (this.onCallback !== undefined) {
+          void Promise.resolve(this.onCallback(tap)).catch((error) => this.onError(error))
+        }
+        continue
+      }
       const chat = chatOf(update)
       if (chat === undefined) continue
       this.onChat(chat)
