@@ -129,6 +129,30 @@ test('discover lists chats and explains an empty answer', async () => {
   assert.equal(missing.error, 'no such bot')
 })
 
+test('discover works from a raw token, so the add form can look before saving', async () => {
+  // The chat id is required to save, so requiring a saved bot to discover a
+  // chat would close the circle the add form has to walk through.
+  const { state, handlers } = harness()
+  const found = await body(await handlers.discover({ token: TOKEN }))
+  assert.deepEqual(found.chats, [{ id: '7', title: 'Roman', type: 'private' }])
+  assert.equal(state.list.length, 0, 'looking stores nothing')
+  assert.equal(state.calls[0].method, 'getUpdates')
+  assert.match((await body(await handlers.discover({ token: 'nope' }))).error, /does not look like a bot token/)
+})
+
+test('an empty discover answer says why, in the words the operator needs', async () => {
+  const { handlers } = harness()
+  const empty = createHandlers({
+    list: async () => [], save: async () => {}, getToken: async () => TOKEN,
+    setToken: async () => {}, clearToken: async () => {}, reload: () => {},
+    api: async () => [],
+  })
+  const answer = await body(await empty.discover({ token: TOKEN }))
+  assert.deepEqual(answer.chats, [])
+  assert.match(answer.hint, /\/start/)
+  assert.ok(handlers)
+})
+
 test('a destination without a stored token fails loudly instead of sending nothing', async () => {
   const { handlers } = harness({ list: [{ id: 'ops', label: 'Ops', chatId: '7' }] })
   assert.match((await body(await handlers.test({ id: 'ops' }))).error, /no token stored/)

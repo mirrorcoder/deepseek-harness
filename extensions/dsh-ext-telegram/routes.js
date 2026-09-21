@@ -75,15 +75,34 @@ export function createHandlers(deps) {
       return json({ ok: true, destination: redact(record, { hasToken: true }) })
     },
 
-    /** Chats that have written to this bot; a bot cannot open a chat itself. */
+    /**
+     * Chats that have written to this bot; a bot cannot open a chat itself.
+     * Accepts a raw token so the add form can look before anything is saved —
+     * the chat id is required to save, so demanding a saved bot first would
+     * close the circle.
+     */
     async discover(body) {
-      const list = await deps.list()
-      const id = String(body.id ?? '')
-      if (!list.some((d) => d.id === id)) return fail('no such bot', 404)
+      const raw = String(body.token ?? '').trim()
+      let token
+      if (raw.length > 0) {
+        if (!/^\d+:[A-Za-z0-9_-]{20,}$/.test(raw)) return fail('that does not look like a bot token (expected 123456:AA…)')
+        token = raw
+      } else {
+        const list = await deps.list()
+        const id = String(body.id ?? '')
+        if (!list.some((d) => d.id === id)) return fail('no such bot', 404)
+        token = await withToken(id)
+      }
       try {
-        const updates = await deps.api(await withToken(id), 'getUpdates', { limit: 100, timeout: 0 })
+        const updates = await deps.api(token, 'getUpdates', { limit: 100, timeout: 0 })
         const chats = chatsFromUpdates(updates)
-        return json({ ok: true, chats, hint: chats.length === 0 ? 'Write /start to the bot in Telegram (or add it to the group), then look again.' : undefined })
+        return json({
+          ok: true,
+          chats,
+          hint: chats.length === 0
+            ? 'Напиши боту /start в Telegram (или добавь его в группу) и нажми ещё раз — бот не может написать первым.'
+            : undefined,
+        })
       } catch (error) {
         return fail(error.message)
       }

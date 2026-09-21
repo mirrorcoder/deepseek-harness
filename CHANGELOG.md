@@ -12,6 +12,18 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.7.1 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **The add form could not be completed.** "Найти чаты" existed only on an
+  already-saved bot, and saving required a chat id, so the first bot could
+  never be added from the panel — the field's own placeholder pointed at a
+  button that was not on screen yet. The button now sits next to the chat id
+  field, works from the token typed into the form (nothing is stored to look),
+  and each chat it finds is a click that fills the field. The form also says
+  plainly that a bot cannot write first, so `/start` comes before looking.
+
 ## v1.7.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

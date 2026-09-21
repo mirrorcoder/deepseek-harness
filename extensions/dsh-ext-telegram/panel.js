@@ -54,9 +54,12 @@ const HTML = `<button class="dsh-tg-btn" id="dsh-tg-open" type="button" aria-lab
 <label for="dsh-tg-token">Токен от @BotFather</label>
 <input id="dsh-tg-token" type="password" placeholder="123456:AA…" autocomplete="off">
 <div class="dsh-tg-grid">
-<div><label for="dsh-tg-chat">Chat id</label><input id="dsh-tg-chat" placeholder="напиши боту, затем «Найти чаты»" autocomplete="off"></div>
+<div><label for="dsh-tg-chat">Куда слать</label>
+<div style="display:flex;gap:6px"><input id="dsh-tg-chat" placeholder="chat id" autocomplete="off"><button id="dsh-tg-find" type="button" style="white-space:nowrap">Найти чаты</button></div></div>
 <div><label for="dsh-tg-mode">Что слать</label><select id="dsh-tg-mode"><option value="stream">всё: вопрос, ответ, инструменты</option><option value="summary">только итоги и вопросы</option></select></div>
 </div>
+<div class="dsh-tg-dim" style="margin-top:6px">Бот не может написать первым: сначала напиши ему <b>/start</b> в Telegram, потом жми «Найти чаты».</div>
+<div id="dsh-tg-chats" style="margin-top:8px"></div>
 <div style="margin-top:12px"><button class="primary" id="dsh-tg-add" type="button">Добавить</button>
 <span class="dsh-tg-dim" id="dsh-tg-hint"></span></div>
 </div></div>`
@@ -81,7 +84,7 @@ function row(d){
   var act=document.createElement('div');act.className='dsh-tg-act'
   act.appendChild(btn('Тест',function(){call('test',{id:d.id}).then(function(){say('ok','Отправлено в '+d.label)}).catch(function(e){say('err',e.message)})}))
   if(!d.readOnly){
-    act.appendChild(btn('Найти чаты',function(){
+    act.appendChild(btn('Чаты',function(){
       call('discover',{id:d.id}).then(function(j){
         if(j.chats.length===0){say('err',j.hint||'Чатов нет');return}
         say('ok',j.chats.map(function(c){return c.title+' → '+c.id}).join('   |   '))
@@ -116,17 +119,29 @@ $('dsh-tg-token').addEventListener('change',function(){
   if(t.length===0)return
   call('validate',{token:t}).then(function(j){$('dsh-tg-hint').textContent='бот @'+j.username}).catch(function(e){say('err',e.message)})
 })
+$('dsh-tg-find').addEventListener('click',function(){
+  clear()
+  var picks=$('dsh-tg-chats')
+  picks.textContent=''
+  var token=$('dsh-tg-token').value.trim()
+  if(token.length===0){say('err','Сначала вставь токен бота');return}
+  call('discover',{token:token}).then(function(j){
+    if(j.chats.length===0){say('err',j.hint||'Чатов нет');return}
+    j.chats.forEach(function(c){
+      picks.appendChild(btn(c.title+' · '+c.id,function(){
+        $('dsh-tg-chat').value=c.id
+        say('ok','Выбран чат: '+c.title)
+      }))
+    })
+  }).catch(function(e){say('err',e.message)})
+})
 $('dsh-tg-add').addEventListener('click',function(){
   clear()
   var body={label:$('dsh-tg-label').value,token:$('dsh-tg-token').value.trim(),chatId:$('dsh-tg-chat').value.trim(),mode:$('dsh-tg-mode').value}
-  if(body.chatId.length===0){
-    call('validate',{token:body.token}).then(function(j){
-      say('ok','Токен принят (@'+j.username+'). Напиши боту /start в Telegram, добавь его с любым chat id и нажми «Найти чаты».')
-    }).catch(function(e){say('err',e.message)})
-    return
-  }
+  if(body.token.length===0){say('err','Нужен токен бота от @BotFather');return}
+  if(body.chatId.length===0){say('err','Нужен чат: нажми «Найти чаты» и выбери');return}
   call('save',body).then(function(){
-    $('dsh-tg-token').value='';$('dsh-tg-label').value='';$('dsh-tg-chat').value='';$('dsh-tg-hint').textContent=''
+    $('dsh-tg-token').value='';$('dsh-tg-label').value='';$('dsh-tg-chat').value='';$('dsh-tg-hint').textContent='';$('dsh-tg-chats').textContent=''
     say('ok','Бот добавлен')
     return load()
   }).catch(function(e){say('err',e.message)})
