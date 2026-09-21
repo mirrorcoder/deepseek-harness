@@ -14,11 +14,19 @@ export function chatOf(update) {
   const chat = message?.chat
   if (chat?.id === undefined) return undefined
   const person = [chat.first_name, chat.last_name].filter(Boolean).join(' ')
+  // A photo arrives as sizes from thumbnail to original; the last is the one
+  // worth showing a vision model. An image sent as a file is a document.
+  const photo = Array.isArray(message?.photo) && message.photo.length > 0
+    ? message.photo[message.photo.length - 1].file_id
+    : (typeof message?.document?.mime_type === 'string' && message.document.mime_type.startsWith('image/')
+        ? message.document.file_id
+        : undefined)
   return {
     id: String(chat.id),
     title: chat.title ?? (person.length > 0 ? person : (chat.username ?? String(chat.id))),
     type: chat.type,
-    text: message?.text,
+    text: message?.text ?? message?.caption,
+    photo,
     threadId: message?.message_thread_id,
   }
 }

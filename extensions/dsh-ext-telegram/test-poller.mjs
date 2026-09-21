@@ -10,9 +10,24 @@ const message = (id, text, extra = {}) => ({
 })
 
 test('a chat is extracted from every update shape, with a readable name', () => {
-  assert.deepEqual(chatOf(message(1, 'hi')), { id: '7', title: 'Roman', type: 'private', text: 'hi', threadId: undefined })
+  assert.deepEqual(chatOf(message(1, 'hi')), { id: '7', title: 'Roman', type: 'private', text: 'hi', photo: undefined, threadId: undefined })
   assert.equal(chatOf({ my_chat_member: { chat: { id: -100, type: 'supergroup', title: 'Ops' } } }).title, 'Ops')
   assert.equal(chatOf({}), undefined)
+})
+
+test('a photo arrives as its largest size, with the caption as the text', () => {
+  const photo = chatOf({
+    message: {
+      caption: 'что тут не так?',
+      photo: [{ file_id: 'small' }, { file_id: 'medium' }, { file_id: 'original' }],
+      chat: { id: 7, type: 'private', first_name: 'Roman' },
+    },
+  })
+  assert.equal(photo.photo, 'original', 'the thumbnail is useless to a vision model')
+  assert.equal(photo.text, 'что тут не так?')
+  // an image sent as a file counts too; other documents do not
+  assert.equal(chatOf({ message: { document: { file_id: 'doc', mime_type: 'image/png' }, chat: { id: 7, type: 'private' } } }).photo, 'doc')
+  assert.equal(chatOf({ message: { document: { file_id: 'doc', mime_type: 'application/pdf' }, chat: { id: 7, type: 'private' } } }).photo, undefined)
 })
 
 /** An api stub returning queued batches, then nothing. */

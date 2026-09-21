@@ -24,7 +24,7 @@
 import { randomUUID } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { TelegramClient, callTelegram } from './telegram.js'
+import { TelegramClient, callTelegram, downloadFile } from './telegram.js'
 import { completionText, errorText, formatEvent, topicTitle } from './format.js'
 import { envDestination, tokenRef } from './destinations.js'
 import { createHandlers, dispatch } from './routes.js'
@@ -210,11 +210,23 @@ export function apply(ctx, initial) {
         adoptThread(message.chatId, message.threadId, sessionId)
       }
       rememberOwnPrompt(sessionId, text)
+      // A photo sent to the bot travels with the prompt, so a vision-capable
+      // model can look at it. Non-vision routes refuse the request, and that
+      // refusal is reported rather than swallowed.
+      const content = []
+      if (message?.photo !== undefined && message.tokenRef !== undefined) {
+        const token = await getToken(message.tokenRef)
+        if (token !== undefined && token.length > 0) {
+          const image = await downloadFile(token, message.photo)
+          content.push({ type: 'image', mediaType: image.mediaType, data: image.data.toString('base64') })
+        }
+      }
+      content.push({ type: 'text', text })
       await controller.prompt({
         requestId: randomUUID(),
         sessionId,
         mode: 'queue',
-        content: [{ type: 'text', text }],
+        content,
       }, new AbortController().signal)
     },
     cancel: (sessionId) => {
@@ -347,6 +359,8 @@ export function apply(ctx, initial) {
             try {
               return await handleMessage({
                 text: chat.text,
+                photo: chat.photo,
+                tokenRef: ref,
                 chatId: chat.id,
                 threadId: chat.threadId,
                 threadSession: threadSessions.get(`${chat.id}:${chat.threadId ?? ''}`),

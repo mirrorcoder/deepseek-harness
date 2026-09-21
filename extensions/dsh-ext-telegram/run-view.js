@@ -9,14 +9,11 @@
 //
 // Rendering is pure (`renderRun`); the view only decides when to redraw.
 
+import { escapeHtml, toTelegramHtml } from './markdown.js'
+
 const MAX = 3600
 
-export function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-}
+export { escapeHtml }
 
 /** Keep the tail of a long answer: the end is what a reader needs. */
 export function clampTail(text, max = MAX) {
@@ -32,7 +29,9 @@ export function clampTail(text, max = MAX) {
 export function renderRun(state) {
   const parts = []
   const body = clampTail(state.text ?? '')
-  if (body.trim().length > 0) parts.push(escapeHtml(body))
+  // The model writes Markdown; Telegram renders a small HTML subset. Convert
+  // rather than escape, or tables and bold arrive as punctuation.
+  if (body.trim().length > 0) parts.push(toTelegramHtml(body))
   if (!state.done) {
     const tool = state.tool
     parts.push(tool === undefined

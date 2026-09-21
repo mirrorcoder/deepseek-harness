@@ -12,6 +12,22 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.13.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Answers are rendered, not dumped.** The model writes Markdown and Telegram
+  renders a small HTML subset, so `##`, `**` and `|` arrived as punctuation.
+  Headings become bold lines, bullets become dots, fences become code blocks,
+  and **tables become aligned monospace blocks** — the only shape a table
+  survives in on a phone. An unclosed fence, which is the normal state halfway
+  through a stream, is closed for the render instead of swallowing the rest.
+- **The bot can look at pictures.** A photo (or an image sent as a file) goes
+  into the session as an image alongside its caption, so a vision-capable route
+  can read it. DeepSeek's `deepseek-flash` and `deepseek-v4-flash-vision-exp`
+  accept images; a text-only route refuses the request and the refusal is
+  reported rather than swallowed.
+
 ## v1.12.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

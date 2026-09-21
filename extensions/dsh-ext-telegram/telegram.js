@@ -20,6 +20,27 @@ export async function callTelegram(token, method, payload = {}, fetchImpl = glob
   return body.result
 }
 
+/**
+ * Fetch one Telegram file as bytes: `getFile` gives a path, the file endpoint
+ * gives the content. This is how a photo sent to the bot reaches a model.
+ * @returns {Promise<{data: Buffer, mediaType: string}>}
+ */
+export async function downloadFile(token, fileId, fetchImpl = globalThis.fetch) {
+  const file = await callTelegram(token, 'getFile', { file_id: fileId }, fetchImpl)
+  const path = file?.file_path
+  if (typeof path !== 'string' || path.length === 0) throw new Error('Telegram returned no path for this file')
+  const response = await fetchImpl(`${API}/file/bot${token}/${path}`)
+  if (!response.ok) throw new Error(`file download failed: HTTP ${response.status}`)
+  const data = Buffer.from(await response.arrayBuffer())
+  const extension = path.split('.').pop()?.toLowerCase()
+  const mediaType = extension === 'png'
+    ? 'image/png'
+    : extension === 'webp'
+      ? 'image/webp'
+      : extension === 'gif' ? 'image/gif' : 'image/jpeg'
+  return { data, mediaType }
+}
+
 export class TelegramClient {
   /**
    * @param {{token: string, chatId: string, minIntervalMs?: number,
