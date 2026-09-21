@@ -72,6 +72,33 @@ deploy/publish.sh                # push to GitHub + local mirror
 docker logs -f dsh               # runtime log
 ```
 
+## Versioning and releases
+
+The fork has its own version line, independent of upstream: `VERSION` at the
+repo root, semver, tagged `vX.Y.Z` (upstream's own `dsh-v*` tags live in the
+same repo and are never touched). `CHANGELOG.md` defines what major / minor /
+patch mean here and records the upstream base of each release.
+
+`deploy/build-info.json` is the release stamp: fork version, commit, upstream
+base, build date, extension versions. `deploy/gen-build-info.sh` writes it, the
+`Dockerfile` bakes it to `/opt/dsh/build-info.json`, and `dsh-ext-version`
+surfaces it as the `/version` command plus one line of system prompt, so both
+the operator and the model know which build is answering. The container image
+is tagged `deepseek-harness:<fork version>`.
+
+Cutting a release:
+
+```sh
+$EDITOR CHANGELOG.md           # add the "## vX.Y.Z" section first
+deploy/release.sh minor        # or patch / major / an explicit 1.4.0
+```
+
+`release.sh` refuses to tag a version with no changelog section or an existing
+tag. It bumps `VERSION`, stamps `build-info.json`, commits, tags, pushes to
+GitHub and the mirror, rebuilds, redeploys, reinstalls the bundles, runs the
+extension tests and prints the login link. `deploy/release.sh --redeploy`
+rebuilds the current version without bumping anything.
+
 ## Branching
 
 `main` = upstream tag `dsh-v<DSH_VERSION>` + our commits under `deploy/`,

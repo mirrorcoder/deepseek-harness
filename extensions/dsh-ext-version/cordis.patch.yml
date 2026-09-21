@@ -1,0 +1,6 @@
+# Host-plane row: one `/version` command and one system-prompt line.
+- insert:
+    - id: ext-version
+      name: dsh-ext-version
+      config:
+        buildInfoPath: /opt/dsh/build-info.json

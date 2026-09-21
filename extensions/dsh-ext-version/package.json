@@ -1,0 +1,14 @@
+{
+  "name": "dsh-ext-version",
+  "version": "0.1.0",
+  "description": "Fork identity: /version command and a system-prompt line naming the running build, upstream base and installed extensions",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*"
+  }
+}

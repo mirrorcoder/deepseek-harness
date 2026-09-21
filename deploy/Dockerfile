@@ -35,6 +35,9 @@ RUN ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin
  && chmod +x /usr/local/lib/node_modules/@modelcontextprotocol/server-memory/dist/index.js \
              /usr/local/lib/node_modules/@upstash/context7-mcp/dist/index.js \
              /usr/local/lib/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js
+# Release stamp of THIS fork (deploy/gen-build-info.sh writes it; /version reads it).
+COPY VERSION /opt/dsh/VERSION
+COPY deploy/build-info.json /opt/dsh/build-info.json
 COPY deploy/web-docker.patch.yml /opt/dsh/web-docker.patch.yml
 COPY deploy/features.patch.yml /opt/dsh/features.patch.yml
 COPY deploy/entrypoint.sh /opt/dsh/entrypoint.sh
