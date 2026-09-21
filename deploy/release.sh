@@ -68,4 +68,9 @@ echo "→ extension tests"
 docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about; do printf "   %-24s " "$p"; node --test "$p/test.mjs" 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
 echo "→ running build:"
 docker exec dsh cat /opt/dsh/build-info.json
+# Each release leaves ~1 GB behind on a box that runs several other stacks.
+echo "→ reclaiming build cache and superseded images"
+docker builder prune -af >/dev/null 2>&1 || true
+docker image ls deepseek-harness --format '{{.Tag}}' | grep -v "^${next}$" | xargs -r -n1 docker image rm >/dev/null 2>&1 || true
+df -h / | tail -1
 ./login-link.sh
