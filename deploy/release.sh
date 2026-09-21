@@ -70,10 +70,12 @@ echo "→ running build:"
 docker exec dsh cat /opt/dsh/build-info.json
 # Each release leaves ~1 GB behind on a box that runs several other stacks.
 echo "→ reclaiming build cache and superseded images"
-docker builder prune -af >/dev/null 2>&1 || true
-# `docker image rm` needs repository:tag — a bare tag is "no such image", which
-# is why the first version of this line silently kept every old build.
-docker image ls deepseek-harness --format '{{.Repository}}:{{.Tag}}' \
-  | grep -v ":${next}$" | xargs -r -n1 docker image rm >/dev/null 2>&1 || true
+# Reported, not silenced: a cleanup that fails quietly is how this box reached
+# 100% twice. `docker image rm` needs repository:tag — a bare tag is "no such
+# image", which is how the first version of this kept every old build.
+docker builder prune -af | tail -1
+for image in $(docker image ls deepseek-harness --format '{{.Repository}}:{{.Tag}}' | grep -v ":${next}$"); do
+  docker image rm "$image" >/dev/null && echo "   removed $image" || echo "   !! could not remove $image (still referenced?)"
+done
 df -h / | tail -1
 ./login-link.sh
