@@ -12,6 +12,26 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.2.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Configuring a model did not work through the public URL: the client withholds
+host-persisted settings from any page whose authority is not loopback, so
+Settings → Models reports "settings are unavailable in this browser" and has
+nowhere to store an API key. That gate is upstream's and deliberate; these are
+the two ways around it that keep the key on the server.
+
+- `deploy/model.sh` — `key` reads a credential from stdin into `deploy/.env`
+  (git-ignored, 0600) and redeploys, `default <provider> <model>` writes the
+  default route into `settings.yaml` live, `show` reports the configuration
+  without printing secrets.
+- `deploy/tunnel.sh` — prints the SSH port-forward that makes the page loopback
+  for real, where the Settings UI works unchanged.
+- `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` pass from
+  `deploy/.env` into the container: the launch environment is the first
+  credential layer the harness consults.
+
 ## v1.1.0 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

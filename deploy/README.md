@@ -17,6 +17,8 @@ clone it and pull updates.
 | `skills/` | Seed skills copied into `$DSH_HOME/skills` on first update (never overwritten). |
 | `docker-compose.yml` | `dsh` (Web UI) + `dsh-git` (read-only git mirror over HTTP) + `dsh-imggw-bridge` (unix socket to the host's Codex image gateway). |
 | `login-link.sh` | Prints the one-time `?token=` URL after a (re)start. |
+| `model.sh` | Configure a model without the Settings UI: `key` (stdin → `.env` → redeploy), `default <provider> <model>`, `show`. |
+| `tunnel.sh` | Prints the SSH port-forward that makes the page loopback, where the full Settings UI works. |
 | `update.sh` | `git pull` → rebuild → reinstall bundles → restart → tests → login link. |
 | `publish.sh` | Push `main` + tags to GitHub (`origin`) and to the local mirror (`/srv/git`). |
 | `sync-upstream.sh` | Merge `upstream/master` (or a release tag) into `main`. |
@@ -43,8 +45,21 @@ profile closure). `update.sh` runs them.
   it sets a signed 30-day cookie and redirects to `/`. The token changes on each
   container start, existing cookies stay valid (secret persisted in
   `$DSH_HOME/.credentials.yaml`).
-* API keys: **Settings → Models** in the UI. Stored in
-  `/root/dsh-data/data/dsh/.credentials.yaml` (never in the image or git).
+* **API keys and the Settings UI.** The client offers the privileged surface —
+  settings that persist to the harness home, "open configuration file" — only
+  when the page authority is loopback, its stand-in for "the operator's own
+  machine". Through the public domain Settings → Models therefore answers
+  *"settings are unavailable in this browser"* and cannot store a key. Two ways
+  to configure a model, both leaving the key on the server:
+  * `deploy/tunnel.sh` prints an SSH port-forward; the forwarded page **is**
+    loopback, so the Settings UI works fully and writes
+    `/root/dsh-data/data/dsh/.credentials.yaml`. Afterwards the public URL
+    works normally — the tunnel is only needed to change settings.
+  * `deploy/model.sh key` stores the key in `deploy/.env` (git-ignored, 0600)
+    and redeploys; the launch environment is the first credential layer the
+    harness consults, so no UI is involved. `deploy/model.sh default <provider>
+    <model>` sets the default route for new sessions, `deploy/model.sh show`
+    reports what is configured without printing secrets.
 * The agent's workspace is `/root/dsh-data/workspace` (container `/workspace`);
   it contains a clone of this fork so the harness can work on itself.
 

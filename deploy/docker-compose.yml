@@ -25,6 +25,12 @@ services:
       # credential layer (launch environment wins)
       DSH_IMAGE_GATEWAY_TOKEN: ${DSH_IMAGE_GATEWAY_TOKEN:-}
       DSH_IMAGE_GATEWAY_SOCKET: /run/imggw/gateway.sock
+      # Model credentials. The launch environment is the first credential layer
+      # the harness consults, so a key set here works without the Settings UI —
+      # which a reverse-proxied page cannot offer (see deploy/README.md).
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     volumes:
       # $DSH_HOME (settings, .credentials.yaml with API keys, sessions, profiles)
       - ${DSH_DATA_DIR:-/root/dsh-data}/data:/data
