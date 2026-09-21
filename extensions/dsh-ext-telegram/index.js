@@ -254,22 +254,25 @@ export function apply(ctx, initial) {
       reload: rebuild,
     })
 
+    // Fetch routes are EXACT paths — a wildcard matches nothing — so each
+    // action is its own registration.
     ctx.inject(['connection'], (cctx) => {
-      cctx.effect(() => cctx.connection.fetch.register({
-        path: `${ROUTE_PREFIX}*`,
-        methods: ['POST'],
-        requestBody: 'buffered',
-        fetch: async (request) => {
-          const action = new URL(request.url).pathname.slice(ROUTE_PREFIX.length)
-          let body = {}
-          try {
-            body = await request.json()
-          } catch {
-            body = {}
-          }
-          return dispatch(handlers, action, body)
-        },
-      }), 'ext-telegram: panel routes')
+      for (const action of Object.keys(handlers)) {
+        cctx.effect(() => cctx.connection.fetch.register({
+          path: `${ROUTE_PREFIX}${action}`,
+          methods: ['POST'],
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            let body = {}
+            try {
+              body = await request.json()
+            } catch {
+              body = {}
+            }
+            return dispatch(handlers, action, body)
+          },
+        }), `ext-telegram: ${ROUTE_PREFIX}${action}`)
+      }
     })
 
     ctx.inject(['webServer'], (wctx) => {
