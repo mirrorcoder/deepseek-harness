@@ -93,6 +93,11 @@ export function createHandlers(deps) {
         if (!list.some((d) => d.id === id)) return fail('no such bot', 404)
         token = await withToken(id)
       }
+      // A running poller is the bot's only `getUpdates` consumer — asking
+      // Telegram again would answer with the nothing it already handed over —
+      // so what it has seen is the authoritative list while it runs.
+      const cached = deps.seenChats?.(token) ?? []
+      if (cached.length > 0) return json({ ok: true, chats: cached })
       try {
         const updates = await deps.api(token, 'getUpdates', { limit: 100, timeout: 0 })
         const chats = chatsFromUpdates(updates)

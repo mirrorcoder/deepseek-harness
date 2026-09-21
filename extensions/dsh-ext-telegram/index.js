@@ -25,6 +25,7 @@ import { completionText, errorText, formatEvent, topicTitle } from './format.js'
 import { envDestination, tokenRef } from './destinations.js'
 import { createHandlers, dispatch } from './routes.js'
 import { panelRows } from './panel.js'
+import { UpdatePoller } from './poller.js'
 
 export const name = 'ext-telegram'
 
@@ -44,6 +45,12 @@ export const Config = z.object({
   destinations: z.array(Destination).default([]),
   /** Show the ✈ button and serve its routes. */
   panel: z.boolean().default(true),
+  /**
+   * Let the bot answer `/start`, `/id`, `/status` and `/help`. Telegram allows
+   * one update consumer per token, so turn this off if the same bot is already
+   * polled by another process.
+   */
+  commands: z.boolean().default(true),
   /** Minimum gap between messages to one chat; Telegram throttles past roughly one per second. */
   minIntervalMs: z.number().default(1200),
   /** Outbox bound per destination. */
@@ -112,7 +119,70 @@ export function apply(ctx, initial) {
         : { destination, client: undefined, sessions: new WeakMap(), topicsUsable: destination.topics })
     }
     targets = next
+    void syncPollers()
   }
+
+  // ── the bot answers ───────────────────────────────────────────────────────
+  /** token → { poller, chats: Map<id, chat> } */
+  const pollers = new Map()
+
+  /** Chats a running poller has seen, newest first — what discover prefers. */
+  const seenChats = (token) => [...(pollers.get(token)?.chats.values() ?? [])].reverse()
+
+  const statusLine = () => {
+    if (targets.size === 0) return 'Пока ни один чат не подключён.'
+    return [...targets.values()]
+      .map((t) => `${t.destination.label || t.destination.id}: chat ${t.destination.chatId}, ${t.destination.mode === 'summary' ? 'только итоги' : 'полная лента'}`)
+      .join('\n')
+  }
+
+  /** Start a poller for every token that wants one; stop the rest. */
+  const syncPollers = async () => {
+    if (!config.commands) return
+    const wanted = new Map()
+    for (const target of targets.values()) {
+      const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
+      const token = await getToken(ref)
+      if (token !== undefined && token.length > 0) wanted.set(token, true)
+    }
+    for (const [token, entry] of pollers) {
+      if (!wanted.has(token)) {
+        entry.poller.stop()
+        pollers.delete(token)
+      }
+    }
+    for (const token of wanted.keys()) {
+      if (pollers.has(token)) continue
+      const chats = new Map()
+      const poller = new UpdatePoller({
+        api: (method, payload) => callTelegram(token, method, payload),
+        onChat: (chat) => {
+          chats.delete(chat.id)
+          chats.set(chat.id, { id: chat.id, title: chat.title, type: chat.type })
+        },
+        reply: (chatId, text, threadId) => {
+          void callTelegram(token, 'sendMessage', {
+            chat_id: chatId,
+            text,
+            ...(threadId === undefined ? {} : { message_thread_id: threadId }),
+          }).catch((error) => ctx.logger?.warn?.(`ext-telegram: reply failed: ${error.message}`))
+        },
+        facts: (chatId) => ({
+          chatId,
+          configured: [...targets.values()].some((t) => t.destination.chatId === chatId),
+          status: statusLine(),
+        }),
+        onError: (error) => ctx.logger?.warn?.(`ext-telegram: ${error.message}`),
+      })
+      pollers.set(token, { poller, chats })
+      void poller.run()
+    }
+  }
+
+  ctx.effect(() => () => {
+    for (const entry of pollers.values()) entry.poller.stop()
+    pollers.clear()
+  }, 'ext-telegram: update pollers')
 
   const clientFor = async (target) => {
     if (target.client !== undefined) return target.client
@@ -250,6 +320,7 @@ export function apply(ctx, initial) {
       setToken,
       clearToken,
       api: (token, method, payload) => callTelegram(token, method, payload),
+      seenChats,
       envDestination: () => envDestination(process.env),
       reload: rebuild,
     })
@@ -294,11 +365,17 @@ export function apply(ctx, initial) {
           return { kind: 'success', text: 'Ни одного включённого бота. Открой панель ✈ справа внизу и добавь.' }
         }
         broadcast(agent.session, '🔔 Проверка связи из dsh')
+        const conflicted = [...pollers.values()].filter((e) => e.poller.conflict).length
         const lines = [...targets.values()].map((t) => {
           const client = t.client
           return `${t.destination.label || t.destination.id}: chat ${t.destination.chatId}, ${t.destination.mode}, треды ${t.topicsUsable ? 'да' : 'нет'}`
             + (client === undefined ? ', ещё не отправлял' : `, отправлено ${client.sent}, в очереди ${client.queue.length}, потеряно ${client.dropped}`)
         })
+        if (config.commands) {
+          lines.push(conflicted > 0
+            ? `Команды бота: ${conflicted} бот(а) уже опрашивает другой процесс, ответов не будет`
+            : `Команды бота: слушаю (${pollers.size})`)
+        }
         return { kind: 'success', text: lines.join('\n') }
       },
     }))

@@ -12,6 +12,23 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.8.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **The bot answers.** Until now the bridge only wrote: a person sending
+  `/start` got silence, which reads as broken even though the broadcast works.
+  The bot now keeps one long-polling consumer per token and replies to
+  `/start` (confirms the chat and prints its id), `/id`, `/status` (what the
+  broadcast is currently wired to) and `/help`. Replies go back into the
+  thread they came from.
+- Telegram allows exactly one update consumer per bot. A conflict stops that
+  poller with an explicit log line instead of fighting another process, `/tg`
+  reports it, and `commands: false` turns the whole thing off for a token that
+  belongs to something else.
+- "Найти чаты" now prefers what the running poller has seen, because a second
+  `getUpdates` would be answered with the nothing it already consumed.
+
 ## v1.7.1 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

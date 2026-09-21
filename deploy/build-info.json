@@ -1,5 +1,5 @@
 {
-  "forkVersion": "1.7.1",
+  "forkVersion": "1.8.0",
   "upstreamBase": "dsh-v0.1.5-rc.2",
   "upstreamNpm": "0.1.5-rc.2",
   "releasedAt": "2026-09-21",
@@ -12,7 +12,7 @@
     "dsh-ext-image-gen": "0.1.0",
     "dsh-ext-peak-guard": "0.1.0",
     "dsh-ext-remote-console": "0.1.0",
-    "dsh-ext-telegram": "0.2.0",
+    "dsh-ext-telegram": "0.3.0",
     "dsh-ext-version": "0.1.0",
     "dsh-ext-workspace-picker": "0.1.0"
   }
