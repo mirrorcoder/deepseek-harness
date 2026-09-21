@@ -12,6 +12,27 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.9.0 — 2026-09-21
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **The bot is a remote control now.** Plain text sent to it reaches a session,
+  so the phone works like the sidebar:
+  * `/sessions` lists the recent ones, numbered, marking which is running and
+    where it lives;
+  * `/use N` points this chat at one of them, after which ordinary messages go
+    straight in;
+  * inside a session's own thread nothing needs pointing at all — the bridge
+    already knows whose thread it is, so replying there continues that session;
+  * `/new [path]` starts a session (in that directory when given) and points
+    the chat at it;
+  * `/workspaces` lists the workspaces with their paths and session counts;
+  * `/stop` interrupts the current turn.
+  Answering is asynchronous, so a slow harness never stalls update consumption,
+  and an unroutable message says why instead of vanishing.
+- The message grammar moved out of the polling loop into its own module, which
+  is what made all of it testable without a bot.
+
 ## v1.8.1 — 2026-09-21
 
 Upstream base: `dsh-v0.1.5-rc.2`.

@@ -1,7 +1,7 @@
 {
   "name": "dsh-ext-telegram",
-  "version": "0.3.1",
-  "description": "Two-way Telegram bridge: live session broadcast into topics, bots managed from the page, and a bot that answers /start",
+  "version": "0.4.0",
+  "description": "Telegram bridge: live session broadcast into topics, bots managed from the page, and a bot you can drive the harness from",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
@@ -13,10 +13,12 @@
     "routes.js",
     "panel.js",
     "poller.js",
+    "control.js",
     "cordis.patch.yml",
     "test.mjs",
     "test-manage.mjs",
-    "test-poller.mjs"
+    "test-poller.mjs",
+    "test-control.mjs"
   ],
   "dsh": {
     "bundle": {

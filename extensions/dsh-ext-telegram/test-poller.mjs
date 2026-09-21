@@ -2,29 +2,11 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-telegram/test-poller.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chatOf, replyFor, UpdatePoller } from './poller.js'
+import { chatOf, UpdatePoller } from './poller.js'
 
 const message = (id, text, extra = {}) => ({
   update_id: id,
   message: { text, message_thread_id: extra.threadId, chat: { id: extra.chatId ?? 7, type: 'private', first_name: 'Roman' } },
-})
-
-test('the bot answers the commands a person actually types', () => {
-  const start = replyFor('/start', { chatId: '7', configured: true })
-  assert.match(start, /chat id: 7/)
-  assert.match(start, /треды сессий/)
-  assert.match(replyFor('/start', { chatId: '7', configured: false }), /панель/)
-  assert.equal(replyFor('/id', { chatId: '-100' }), 'chat id: -100')
-  assert.equal(replyFor('/status', { chatId: '7', status: 'две сессии' }), 'две сессии')
-  assert.match(replyFor('/help', { chatId: '7' }), /\/id/)
-})
-
-test('command parsing tolerates the shapes Telegram delivers', () => {
-  assert.ok(replyFor('/start@my_bot', { chatId: '7' }))
-  assert.ok(replyFor('  /START  ', { chatId: '7' }))
-  assert.ok(replyFor('/start deep link payload', { chatId: '7' }))
-  assert.equal(replyFor('просто сообщение', { chatId: '7' }), undefined)
-  assert.equal(replyFor(undefined, { chatId: '7' }), undefined)
 })
 
 test('a chat is extracted from every update shape, with a readable name', () => {
@@ -55,27 +37,43 @@ test('offset advances past handled updates so nothing repeats', async () => {
   assert.equal(calls[1].payload.offset, 12)
 })
 
-test('chats are remembered and commands answered', async () => {
-  const { api } = stubApi([[message(1, '/start'), message(2, 'привет'), message(3, '/id', { chatId: -100 })]])
+test('every chat is remembered, and only an answered message is replied to', async () => {
+  const { api } = stubApi([[message(1, '/start'), message(2, 'forwarded'), message(3, '/id', { chatId: -100 })]])
   const chats = []
   const replies = []
   const poller = new UpdatePoller({
     api,
     onChat: (chat) => chats.push(chat.id),
     reply: (chatId, text) => replies.push({ chatId, text }),
-    facts: (chatId) => ({ chatId, configured: true }),
+    // the grammar lives in control.js; here it is just "answer or stay silent"
+    onMessage: async (chat) => (chat.text.startsWith('/') ? `answer to ${chat.text}` : undefined),
   })
   await poller.round()
+  await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(chats, ['7', '7', '-100'])
-  assert.deepEqual(replies.map((r) => r.chatId), ['7', '-100'], 'only commands get an answer')
-  assert.match(replies[1].text, /chat id: -100/)
+  assert.deepEqual(replies.map((r) => r.chatId), ['7', '-100'], 'a forwarded message gets no reply')
+  assert.match(replies[1].text, /answer to \/id/)
+})
+
+test('a slow answer does not stall update consumption', async () => {
+  const { api, calls } = stubApi([[message(1, '/slow')], []])
+  let release
+  const poller = new UpdatePoller({
+    api,
+    onMessage: () => new Promise((resolve) => { release = () => resolve('done') }),
+  })
+  await poller.round()
+  await poller.round()
+  assert.equal(calls.length, 2, 'the next round ran while the answer was still pending')
+  release()
 })
 
 test('a reply goes back into the thread it came from', async () => {
   const { api } = stubApi([[message(1, '/id', { threadId: 42 })]])
   const replies = []
-  const poller = new UpdatePoller({ api, reply: (chatId, text, threadId) => replies.push(threadId), facts: (chatId) => ({ chatId }) })
+  const poller = new UpdatePoller({ api, reply: (chatId, text, threadId) => replies.push(threadId), onMessage: async () => 'ok' })
   await poller.round()
+  await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(replies, [42])
 })
 

@@ -18,6 +18,7 @@
 // Nothing here talks to the model, so a broadcast failure can never fail a
 // turn: every outbox is serial, rate-limited, bounded, and reports rather than
 // raises.
+import { randomUUID } from 'node:crypto'
 import z from '@deepseek-ai/schemastery'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { TelegramClient, callTelegram } from './telegram.js'
@@ -26,6 +27,7 @@ import { envDestination, tokenRef } from './destinations.js'
 import { createHandlers, dispatch } from './routes.js'
 import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
+import { Bindings, handleMessage } from './control.js'
 
 export const name = 'ext-telegram'
 
@@ -141,6 +143,49 @@ export function apply(ctx, initial) {
     syncPollers()
   }
 
+  // ── the remote control ────────────────────────────────────────────────────
+  /** `chatId:threadId` → session id, so a reply in a thread lands in its session. */
+  const threadSessions = new Map()
+  const bindings = new Bindings()
+
+  const controlDeps = {
+    bindings,
+    status: statusLine,
+    sessions: async () => {
+      const controller = ctx.get('sessionController')
+      if (controller === undefined) throw new Error('session controller is not mounted')
+      const answer = await controller.list({}, new AbortController().signal)
+      return [...answer.items]
+        .filter((item) => !item.blank)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 10)
+    },
+    workspaces: () => {
+      const registry = ctx.get('workspaceRegistry')
+      if (registry === undefined) return []
+      return registry.list().map((w) => ({ name: w.name, path: w.path, sessions: w.sessionIds?.length }))
+    },
+    create: async (cwd) => {
+      const controller = ctx.get('sessionController')
+      if (controller === undefined) throw new Error('session controller is not mounted')
+      const created = await controller.create(cwd === undefined ? {} : { cwd })
+      return created.sessionId
+    },
+    prompt: async (sessionId, text) => {
+      const controller = ctx.get('sessionController')
+      if (controller === undefined) throw new Error('session controller is not mounted')
+      await controller.prompt({
+        requestId: randomUUID(),
+        sessionId,
+        mode: 'queue',
+        content: [{ type: 'text', text }],
+      }, new AbortController().signal)
+    },
+    cancel: (sessionId) => {
+      ctx.get('sessionController')?.cancel({ sessionId })
+    },
+  }
+
   // ── the bot answers ───────────────────────────────────────────────────────
   /** token → { poller, chats: Map<id, chat> } */
   const pollers = new Map()
@@ -205,11 +250,19 @@ export function apply(ctx, initial) {
               }).catch(note)
             })()
           },
-          facts: (chatId) => ({
-            chatId,
-            configured: [...targets.values()].some((t) => t.destination.chatId === chatId),
-            status: statusLine(),
-          }),
+          onMessage: async (chat) => {
+            try {
+              return await handleMessage({
+                text: chat.text,
+                chatId: chat.id,
+                threadId: chat.threadId,
+                threadSession: threadSessions.get(`${chat.id}:${chat.threadId ?? ''}`),
+              }, controlDeps)
+            } catch (error) {
+              note(error)
+              return `Не получилось: ${error instanceof Error ? error.message : String(error)}`
+            }
+          },
           onError: note,
         })
         pollers.set(ref, { poller, chats, destinationId })
@@ -304,6 +357,9 @@ export function apply(ctx, initial) {
       state.opening = client.createTopic(state.label).then((id) => {
         state.threadId = id
         if (id === undefined) target.topicsUsable = false
+        // Remember which session a thread belongs to, so a reply typed inside
+        // it reaches that session without any binding command.
+        else threadSessions.set(`${target.destination.chatId}:${id}`, session.id)
       })
     }
     void Promise.resolve(state.opening).then(() => client.post(text, state.threadId))
