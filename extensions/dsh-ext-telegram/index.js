@@ -249,6 +249,25 @@ export function apply(ctx, initial) {
    * store that arrives late simply makes the first round fail and the next one
    * succeed.
    */
+  /**
+   * The list Telegram shows behind the "/" button next to the input. Without it
+   * the commands exist but are invisible unless someone reads the help text.
+   */
+  const publishCommandMenu = async (ref) => {
+    const token = await getToken(ref)
+    if (token === undefined || token.length === 0) return
+    await callTelegram(token, 'setMyCommands', {
+      commands: [
+        { command: 'sessions', description: 'Мои сессии — выбрать кнопкой' },
+        { command: 'new', description: 'Новая сессия' },
+        { command: 'workspaces', description: 'Проекты' },
+        { command: 'stop', description: 'Прервать текущий ход' },
+        { command: 'status', description: 'Состояние трансляции' },
+        { command: 'help', description: 'Что я понимаю' },
+      ],
+    }).catch(note)
+  }
+
   const syncPollers = () => {
     if (!config.commands) return
     try {
@@ -340,10 +359,19 @@ export function apply(ctx, initial) {
           onError: note,
           // A failure from the boot race (credentials not loaded yet) must not
           // sit in the panel forever once polling actually works.
-          onOk: () => { lastError = undefined },
+          onOk: () => {
+            lastError = undefined
+            // The menu is published from here, not at construction: at boot the
+            // credential store may not have loaded yet, and a menu published
+            // with no token is a menu nobody sees.
+            const entry = pollers.get(ref)
+            if (entry !== undefined && !entry.menuPublished) {
+              entry.menuPublished = true
+              void publishCommandMenu(ref)
+            }
+          },
         })
-        pollers.set(ref, { poller, chats, destinationId })
-        void publishCommandMenu(ref)
+        pollers.set(ref, { poller, chats, destinationId, menuPublished: false })
         void poller.run()
       }
     } catch (error) {
