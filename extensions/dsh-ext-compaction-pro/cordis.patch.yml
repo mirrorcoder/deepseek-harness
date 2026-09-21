@@ -1,0 +1,4 @@
+# No host-plane row on purpose: in the Web profile compaction is mounted per
+# agent preset (isolate realm). The `pro` preset (deploy/install-extensions.sh)
+# names this package in place of @deepseek-ai/dsh-compaction-basic.
+[]

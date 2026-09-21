@@ -1,6 +1,8 @@
 # DeepSeek Harness behind the box's shared Caddy (network `aisignals-edge`).
-#   dsh      — the harness Web UI, reached by Caddy as dsh:3080
-#   dsh-git  — public read-only git mirror of this fork, Caddy proxies /git/*
+#   dsh               — the harness Web UI, reached by Caddy as dsh:3080
+#   dsh-git           — public read-only git mirror of this fork, Caddy proxies /git/*
+#   dsh-imggw-bridge  — unix-socket bridge to the host-local Codex image gateway
+#                       (127.0.0.1:8792) so `generate_image` needs no open port
 # Host-specific values live in .env (see .env.example).
 services:
   dsh:
@@ -15,11 +17,17 @@ services:
     environment:
       DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:?set in .env}
       TZ: ${TZ:-UTC}
+      # bearer for the image gateway; read by dsh-ext-image-gen through the
+      # credential layer (launch environment wins)
+      DSH_IMAGE_GATEWAY_TOKEN: ${DSH_IMAGE_GATEWAY_TOKEN:-}
+      DSH_IMAGE_GATEWAY_SOCKET: /run/imggw/gateway.sock
     volumes:
       # $DSH_HOME (settings, .credentials.yaml with API keys, sessions, profiles)
       - ${DSH_DATA_DIR:-/root/dsh-data}/data:/data
       # the agent's workspace root (what it can read/edit)
       - ${DSH_DATA_DIR:-/root/dsh-data}/workspace:/workspace
+      # unix socket published by dsh-imggw-bridge
+      - ${DSH_DATA_DIR:-/root/dsh-data}/run:/run/imggw
     ports:
       - "127.0.0.1:3080:3080"
     networks:
@@ -41,6 +49,22 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "2" }
+
+  # Host-network socat: exposes the loopback-only gateway as a unix socket in a
+  # shared directory. No TCP port is opened, so the firewall is untouched.
+  dsh-imggw-bridge:
+    image: alpine/socat
+    container_name: dsh-imggw-bridge
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ${DSH_DATA_DIR:-/root/dsh-data}/run:/run/imggw
+    command: >-
+      UNIX-LISTEN:/run/imggw/gateway.sock,fork,reuseaddr,unlink-early,mode=666
+      TCP:127.0.0.1:${DSH_IMAGE_GATEWAY_HOST_PORT:-8792}
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "1" }
 
 networks:
   aisignals-edge:

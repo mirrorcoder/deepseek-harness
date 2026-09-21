@@ -1,0 +1,56 @@
+# Feature overlay for the containerised Web profile (applied via `--patch`
+# after web-docker.patch.yml). Everything here is shipped-but-dormant upstream
+# functionality that we switch on, plus the MCP servers preinstalled in the
+# image. Per-user additions belong in $DSH_HOME/profiles/web/cordis.patch.yml
+# (hot-reloaded), not here.
+
+- insert:
+    # ── Schedule: schedule_create / schedule_list / schedule_cancel (≥5 min) ──
+    - id: time-context
+      name: '@deepseek-ai/dsh-time-context'
+    - id: schedule
+      name: '@deepseek-ai/dsh-schedule'
+
+    # ── MCP servers (tools appear as mcp__<server>__<tool>) ──
+    # Persistent knowledge-graph memory across sessions.
+    - id: mcp-memory
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: memory
+        transport: stdio
+        command: mcp-server-memory
+        env:
+          MEMORY_FILE_PATH: !!js (process.env.DSH_HOME ?? '/data/dsh') + '/mcp-memory.jsonl'
+    # Up-to-date library docs (resolve-library-id / get-library-docs), no key needed.
+    - id: mcp-context7
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: context7
+        transport: stdio
+        command: context7-mcp
+    # Explicit step-by-step reasoning scratchpad.
+    - id: mcp-sequential-thinking
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: thinking
+        transport: stdio
+        command: mcp-server-sequential-thinking
+
+# Schedule UI (sidebar page) — disabled by the web bundle by default.
+- id: ui-schedule
+  disabled: false
+
+# Full-text search over session history (sidebar search; opens the index on
+# first search only). The web bundle ships it as ':memory:' + never.
+- id: session-query-sqlite
+  config:
+    path: !!js (process.env.DSH_HOME ?? '/data/dsh') + '/session-index.sqlite'
+    openAt: first-search
+    journalMode: wal
+    defaultLimit: 20
+    maxLimit: 100
+
+# OTel session telemetry row removed entirely (the image also sets
+# DSH_TELEMETRY_MODE=DISABLED; this makes the row itself absent).
+- id: session-telemetry-otel
+  disabled: true

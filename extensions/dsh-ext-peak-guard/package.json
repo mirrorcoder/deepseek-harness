@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-peak-guard",
+  "version": "0.1.0",
+  "description": "Token-burn guard: rolling tokens/min budget, stricter during DeepSeek peak hours; warns the model, blocks over budget, /peak status",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "schedule.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-llm": "*"
+  }
+}

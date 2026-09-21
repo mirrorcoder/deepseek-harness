@@ -1,0 +1,9 @@
+# Host-plane row: the tool registers globally, so every agent preset sees it.
+- insert:
+    - id: ext-image-gen
+      name: dsh-ext-image-gen
+      config:
+        socketPath: !!js process.env.DSH_IMAGE_GATEWAY_SOCKET ?? '/run/imggw/gateway.sock'
+        url: !!js process.env.DSH_IMAGE_GATEWAY_URL ?? ''
+        tokenEnv: DSH_IMAGE_GATEWAY_TOKEN
+        outputDir: generated-images

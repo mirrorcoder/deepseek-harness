@@ -1,0 +1,5 @@
+# Host-plane row: wraps every model call (`llm/stream` waterfall) process-wide.
+# Runtime values are editable live in $DSH_HOME/settings.yaml under `peak-guard:`.
+- insert:
+    - id: ext-peak-guard
+      name: dsh-ext-peak-guard

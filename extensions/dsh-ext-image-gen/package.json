@@ -1,0 +1,16 @@
+{
+  "name": "dsh-ext-image-gen",
+  "version": "0.1.0",
+  "description": "generate_image tool: native image generation through a Codex-session gateway (no OpenAI API key)",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "gateway.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/dsh-credentials": "*"
+  }
+}
