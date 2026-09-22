@@ -1,0 +1,5 @@
+# Host-plane row: the unlock tool is global, and the hiding is applied per
+# agent as each is created.
+- insert:
+    - id: ext-toolbelt
+      name: dsh-ext-toolbelt

@@ -12,6 +12,25 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.14.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Tools on demand** (`dsh-ext-toolbelt`). Every tool's JSON schema rides in
+  the head of every request: measured on this deployment, 43 tools cost 10 760
+  tokens before a word of conversation, and 5 797 of those belong to tools used
+  a few times a week. Seven groups — sequential thinking, library docs, the
+  memory graph, workflows, schedule, goals, background jobs — now start hidden
+  through the tool registry's restriction seam, which removes them from the
+  schema list that is actually sent. One ~150-token tool, `enable_tools`, lets
+  the agent unlock a group the moment a task needs it; the unlock lasts for
+  that session and other sessions keep the lean surface.
+  Net effect: the fixed part of every request drops from ~12.5k to ~6.7k
+  tokens, and the first request of a session — the one that pays full price
+  because nothing is cached yet — gets about twice as cheap.
+  Restriction is applied per tool name, so a tool a preset owns rather than
+  inherits simply stays visible instead of costing the whole group its saving.
+
 ## v1.13.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

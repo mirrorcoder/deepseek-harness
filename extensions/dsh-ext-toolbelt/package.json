@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-toolbelt",
+  "version": "0.1.0",
+  "description": "Tools on demand: rarely used tool schemas start hidden and the agent unlocks a group when a task needs it",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "groups.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

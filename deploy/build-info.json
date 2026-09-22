@@ -1,8 +1,8 @@
 {
-  "forkVersion": "1.13.0",
+  "forkVersion": "1.14.0",
   "upstreamBase": "dsh-v0.1.5-rc.2",
   "upstreamNpm": "0.1.5-rc.2",
-  "releasedAt": "2026-09-21",
+  "releasedAt": "2026-09-22",
   "repository": "https://github.com/mirrorcoder/deepseek-harness",
   "mirror": "https://ds.jusl.me/git/deepseek-harness.git",
   "extensions": {
@@ -13,6 +13,7 @@
     "dsh-ext-peak-guard": "0.1.0",
     "dsh-ext-remote-console": "0.1.0",
     "dsh-ext-telegram": "0.8.0",
+    "dsh-ext-toolbelt": "0.1.0",
     "dsh-ext-version": "0.1.0",
     "dsh-ext-workspace-picker": "0.1.0"
   }
