@@ -12,6 +12,36 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.15.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **The access mode is a button in Telegram** (`/mode`). A session runs under a
+  permission preset — read-only, write inside the workspace, or full access
+  with no prompts — and until now that switch existed only in the browser. The
+  bot shows the three presets with the live one marked, and a tap switches the
+  session it is written in. The approval half goes through the approval service
+  rather than straight to the log, so the model is told its policy changed, the
+  same way the web `/permission` command tells it. `/mode full`, `/mode чтение`
+  and the raw preset names all work for typing.
+- **Everything the harness stops to ask is now a button.** Approvals
+  (`approval/request`) and structured questions (`user-questions/request`) are
+  Cordis waterfalls: an answerer either claims the request or hands it on. The
+  bridge does both — it puts the question in the session's thread AND passes
+  the request along — then takes whichever answer arrives first, so a decision
+  can be made on the phone or in the browser, and the screen that lost says
+  where the answer came from. Single-select answers with one tap, multi-select
+  collects ticks until Готово, and "✏️ Ответить текстом" takes the next message
+  in that thread as the answer instead of as a new instruction to the agent.
+  The fail-closed `unavailable` that the chain returns when nobody else is
+  listening is explicitly NOT treated as an answer — otherwise the buttons
+  would be dead the moment they appeared.
+- **Fixed: the operator's own message echoed back under the answer.** A prompt
+  written while the agent is still working is committed only when its turn
+  starts, which on a long run is many minutes later; the echo fingerprint
+  expired after one minute and let those late commits through. It now outlives
+  the queue.
+
 ## v1.14.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

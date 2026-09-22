@@ -2,7 +2,7 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-telegram/test-control.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { Bindings, handleCallback, handleMessage, sessionLabel, sessionsScreen, workspacesScreen } from './control.js'
+import { Bindings, handleCallback, handleMessage, matchMode, modeScreen, sessionLabel, sessionsScreen, workspacesScreen } from './control.js'
 import { workspaceOf } from './topics.js'
 
 const NOW = 1_700_000_000_000
@@ -11,8 +11,14 @@ const items = [
   { sessionId: 'bbbbbbbb-2222', updatedAt: NOW - 3 * 3_600_000, running: false, blank: false, cwd: '/workspace/projects/site' },
 ]
 
+const MODE_OPTIONS = [
+  { value: 'read-only', name: 'read-only' },
+  { value: 'workspace-write', name: 'workspace-write' },
+  { value: 'danger-full-access', name: 'danger-full-access' },
+]
+
 function harness(overrides = {}) {
-  const calls = { prompts: [], cancels: [], creates: [] }
+  const calls = { prompts: [], cancels: [], creates: [], modeReads: [], modeWrites: [] }
   const deps = {
     bindings: new Bindings(),
     now: () => NOW,
@@ -26,6 +32,8 @@ function harness(overrides = {}) {
     create: async (cwd) => { calls.creates.push(cwd); return 'cccccccc-3333' },
     prompt: async (sessionId, text) => { calls.prompts.push({ sessionId, text }) },
     cancel: (sessionId) => { calls.cancels.push(sessionId) },
+    modes: async (sessionId) => { calls.modeReads.push(sessionId); return { current: 'workspace-write', options: MODE_OPTIONS } },
+    setMode: async (sessionId, preset) => { calls.modeWrites.push({ sessionId, preset }); return { current: preset, options: MODE_OPTIONS } },
     ...overrides,
   }
   return { deps, calls }
@@ -162,4 +170,69 @@ test('commands survive the @botname suffix and empty text', async () => {
   const { deps } = harness()
   assert.match((await say(deps, '/sessions@dsharnebot')).text, /Выбери сессию/)
   assert.equal(await say(deps, '   '), undefined)
+})
+
+
+test('the access mode is a screen of presets with the live one marked', () => {
+  const screen = modeScreen({ current: 'workspace-write', options: MODE_OPTIONS })
+  assert.match(screen.text, /Режим доступа: ✍️ Запись в проекте/)
+  assert.match(screen.text, /● ✍️ Запись в проекте/)
+  assert.match(screen.text, /○ 🔓 Полный доступ/)
+  assert.equal(screen.keyboard.length, 3)
+  assert.equal(screen.keyboard[2][0].callback_data, 'mode:danger-full-access')
+  for (const row of screen.keyboard) assert.ok(row[0].text.length <= 64)
+})
+
+test('/mode without a session says whose setting it is', async () => {
+  const { deps, calls } = harness()
+  const answer = await say(deps, '/mode')
+  assert.match(answer.text, /Сначала выбери сессию/)
+  assert.deepEqual(calls.modeReads, [])
+})
+
+test('/mode inside a thread shows that session\'s mode', async () => {
+  const { deps, calls } = harness()
+  const answer = await say(deps, '/mode', { threadId: 5, threadSession: 'aaaaaaaa-1111' })
+  assert.match(answer.text, /Режим доступа/)
+  assert.deepEqual(calls.modeReads, ['aaaaaaaa-1111'])
+})
+
+test('/mode full switches without opening the screen first', async () => {
+  const { deps, calls } = harness()
+  const answer = await say(deps, '/mode full', { threadId: 5, threadSession: 'aaaaaaaa-1111' })
+  assert.deepEqual(calls.modeWrites, [{ sessionId: 'aaaaaaaa-1111', preset: 'danger-full-access' }])
+  assert.match(answer.text, /Режим доступа: 🔓 Полный доступ/)
+})
+
+test('a word that names no preset shows the screen instead of guessing', async () => {
+  const { deps, calls } = harness()
+  const answer = await say(deps, '/mode ну какой-нибудь', { threadId: 5, threadSession: 'aaaaaaaa-1111' })
+  assert.deepEqual(calls.modeWrites, [])
+  assert.match(answer.text, /Режим доступа/)
+})
+
+test('the shorthand knows both the raw names and how a human says them', () => {
+  assert.equal(matchMode(MODE_OPTIONS, 'read-only'), 'read-only')
+  assert.equal(matchMode(MODE_OPTIONS, 'чтение'), 'read-only')
+  assert.equal(matchMode(MODE_OPTIONS, 'полный'), 'danger-full-access')
+  assert.equal(matchMode(MODE_OPTIONS, 'work'), 'workspace-write')
+  assert.equal(matchMode(MODE_OPTIONS, 'w'), undefined, 'одна буква — это не выбор')
+  assert.equal(matchMode(MODE_OPTIONS, ''), undefined)
+})
+
+test('tapping a mode button switches and redraws the same screen', async () => {
+  const { deps, calls } = harness()
+  const opened = await handleCallback({ data: 'mode', chatId: '7', threadId: 5, threadSession: 'aaaaaaaa-1111' }, deps)
+  assert.equal(opened.edit, true)
+  assert.match(opened.text, /Режим доступа/)
+  const switched = await handleCallback({ data: 'mode:read-only', chatId: '7', threadId: 5, threadSession: 'aaaaaaaa-1111' }, deps)
+  assert.deepEqual(calls.modeWrites, [{ sessionId: 'aaaaaaaa-1111', preset: 'read-only' }])
+  assert.equal(switched.answer, 'Режим переключён')
+  assert.match(switched.text, /● 👀 Только чтение/)
+})
+
+test('the home keyboard offers the mode switch', async () => {
+  const { deps } = harness()
+  const start = await say(deps, '/start')
+  assert.ok(start.keyboard.flat().some((button) => button.callback_data === 'mode'))
 })

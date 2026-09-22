@@ -14,6 +14,7 @@ const HELP = [
   '/sessions — список сессий, выбор по нажатию',
   '/workspaces — проекты, новая сессия по нажатию',
   '/new [проект] — новая сессия сразу',
+  '/mode — режим доступа: чтение, запись в проекте, полный',
   '/stop — прервать текущий ход',
   '/status — состояние трансляции',
   '',
@@ -82,9 +83,64 @@ export function workspacesScreen(list) {
   }
 }
 
+/**
+ * How each permission preset reads to a human. The harness ships the raw names
+ * (`read-only`, `workspace-write`, `danger-full-access`); a preset this table
+ * does not know still shows, under its own name.
+ */
+export const MODE_LABELS = {
+  'read-only': { title: '👀 Только чтение', hint: 'Смотрит и рассказывает, ничего не меняет.' },
+  'workspace-write': { title: '✍️ Запись в проекте', hint: 'Правит файлы проекта; всё, что шире, спросит.' },
+  'danger-full-access': { title: '🔓 Полный доступ', hint: 'Делает что угодно и ничего не спрашивает.' },
+  custom: { title: '⚙️ Своя настройка', hint: 'Песочница и подтверждения выставлены вручную.' },
+}
+
+export function modeTitle(option) {
+  return MODE_LABELS[option?.value]?.title ?? option?.name ?? String(option?.value ?? '')
+}
+
+/** Typed shorthand for a preset: `/mode full`, `/mode чтение`, `/mode workspace`. */
+export function matchMode(options, word) {
+  const needle = String(word ?? '').trim().toLowerCase()
+  if (needle.length === 0) return undefined
+  const aliases = {
+    'read-only': ['read', 'ro', 'чтение', 'только чтение', 'смотри'],
+    'workspace-write': ['write', 'workspace', 'проект', 'запись', 'ws'],
+    'danger-full-access': ['full', 'danger', 'полный', 'всё', 'все', 'бог'],
+  }
+  for (const option of options ?? []) {
+    if (option.value.toLowerCase() === needle) return option.value
+    if (option.value.toLowerCase().startsWith(needle) && needle.length >= 3) return option.value
+    if ((aliases[option.value] ?? []).includes(needle)) return option.value
+  }
+  return undefined
+}
+
+/** The access-mode screen: what is in force now, and one button per preset. */
+export function modeScreen(state) {
+  const options = state?.options ?? []
+  const current = options.find((option) => option.value === state?.current)
+  const lines = [
+    `Режим доступа: ${current === undefined ? state?.current ?? 'неизвестно' : modeTitle(current)}`,
+    '',
+    ...options.map((option) => `${option.value === state?.current ? '● ' : '○ '}${modeTitle(option)} — ${MODE_LABELS[option.value]?.hint ?? option.description ?? ''}`.trimEnd()),
+    '',
+    'Нажми, чтобы переключить — действует с этого момента в этой сессии.',
+  ]
+  return {
+    text: lines.join('\n'),
+    keyboard: options.map((option) => [{
+      text: `${option.value === state?.current ? '● ' : ''}${modeTitle(option)}`.slice(0, 64),
+      callback_data: `mode:${option.value}`,
+    }]),
+  }
+}
+
 const HOME_KEYBOARD = [[
   { text: '🗂 Мои сессии', callback_data: 'list' },
   { text: '＋ Новая', callback_data: 'new' },
+], [
+  { text: '🔐 Режим доступа', callback_data: 'mode' },
 ]]
 
 /**
@@ -193,6 +249,17 @@ export async function handleMessage(message, deps) {
       await openSession(message, deps, cwd)
       return `Сессия открыта${cwd ? ` в ${cwd}` : ''}. Пиши задачу.`
     }
+    case '/mode': {
+      const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
+      if (sessionId === undefined) {
+        return { text: 'Сначала выбери сессию — режим доступа принадлежит ей, а не чату.', keyboard: HOME_KEYBOARD }
+      }
+      const state = await deps.modes(sessionId)
+      if (argument.length === 0) return modeScreen(state)
+      const wanted = matchMode(state.options, argument)
+      if (wanted === undefined) return modeScreen(state)
+      return modeScreen(await deps.setMode(sessionId, wanted))
+    }
     case '/stop': {
       const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
       if (sessionId === undefined) return 'Нечего прерывать.'
@@ -243,6 +310,19 @@ export async function handleCallback(tap, deps) {
       text: `Сессия открыта${cwd ? ` в ${cwd}` : ''}. Напиши задачу — начну.`,
       edit: true,
     }
+  }
+
+  if (data === 'mode' || data.startsWith('mode:')) {
+    const sessionId = deps.bindings.resolve(tap.chatId, tap.threadId, tap.threadSession)
+    if (sessionId === undefined) {
+      return { answer: 'Сначала выбери сессию', text: 'Сначала выбери сессию — режим доступа принадлежит ей.', keyboard: HOME_KEYBOARD, edit: true }
+    }
+    if (data === 'mode') {
+      return { ...modeScreen(await deps.modes(sessionId)), edit: true }
+    }
+    const wanted = data.slice('mode:'.length)
+    const state = await deps.setMode(sessionId, wanted)
+    return { answer: 'Режим переключён', ...modeScreen(state), edit: true }
   }
 
   if (data.startsWith('pick:')) {

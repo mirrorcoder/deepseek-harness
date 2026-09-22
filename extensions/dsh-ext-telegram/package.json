@@ -1,7 +1,7 @@
 {
   "name": "dsh-ext-telegram",
-  "version": "0.8.0",
-  "description": "Telegram bridge: live session broadcast into topics, bots managed from the page, and a bot you can drive the harness from",
+  "version": "0.9.0",
+  "description": "Telegram bridge: live session broadcast into topics, the access mode and every question the harness asks as buttons, bots managed from the page",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
@@ -14,6 +14,7 @@
     "panel.js",
     "poller.js",
     "control.js",
+    "ask.js",
     "topics.js",
     "run-view.js",
     "markdown.js",
@@ -22,6 +23,7 @@
     "test-manage.mjs",
     "test-poller.mjs",
     "test-control.mjs",
+    "test-ask.mjs",
     "test-topics.mjs",
     "test-run-view.mjs",
     "test-markdown.mjs"

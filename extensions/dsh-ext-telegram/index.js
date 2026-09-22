@@ -31,6 +31,7 @@ import { createHandlers, dispatch } from './routes.js'
 import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
 import { Bindings, handleCallback, handleMessage } from './control.js'
+import { AskDesk } from './ask.js'
 import { topicSpec, topicName, workspaceOf } from './topics.js'
 import { RunView } from './run-view.js'
 
@@ -247,6 +248,58 @@ export function apply(ctx, initial) {
     cancel: (sessionId) => {
       ctx.get('sessionController')?.cancel({ sessionId })
     },
+    modes: (sessionId) => permissionState(sessionId),
+    setMode: (sessionId, preset) => switchPermission(sessionId, preset),
+  }
+
+  // ── permission presets: the same switch the web UI has, as buttons ────────
+  /** The live agent of one session, resuming it when it is only on disk. */
+  const agentFor = async (sessionId) => {
+    const controller = ctx.get('sessionController')
+    if (controller === undefined) throw new Error('session controller is not mounted')
+    const resolved = await controller.resolveAgent(sessionId)
+    if (resolved?.agent === undefined) {
+      throw new Error(resolved?.error?.message ?? 'эту сессию сейчас не открыть')
+    }
+    return resolved.agent
+  }
+
+  const presetsService = () => {
+    const presets = ctx.get('permissionPresets')
+    if (presets === undefined) throw new Error('в этой сборке нет пресетов доступа')
+    return presets
+  }
+
+  /** What `/mode` shows: every preset this deployment has, and the live one. */
+  const permissionState = async (sessionId) => {
+    const presets = presetsService()
+    const agent = await agentFor(sessionId)
+    return {
+      current: presets.current(agent.session),
+      options: presets.names.map((name) => presets.optionOf(name)),
+    }
+  }
+
+  /**
+   * Switch one session's preset. The approval half goes through the service so
+   * the model is TOLD its policy changed — the same path the `/permission`
+   * command takes; `set` then writes the preset and sandbox knobs, seeing the
+   * approval policy already in place and leaving it alone.
+   */
+  const switchPermission = async (sessionId, preset) => {
+    const presets = presetsService()
+    const agent = await agentFor(sessionId)
+    const spec = presets.resolve(preset)
+    try {
+      ctx.get('approval')?.setPolicy(agent, spec.approval)
+    } catch (error) {
+      note(error)
+    }
+    presets.set(agent.session, preset)
+    return {
+      current: presets.current(agent.session),
+      options: presets.names.map((name) => presets.optionOf(name)),
+    }
   }
 
   // ── the bot answers ───────────────────────────────────────────────────────
@@ -288,6 +341,7 @@ export function apply(ctx, initial) {
         { command: 'sessions', description: 'Мои сессии — выбрать кнопкой' },
         { command: 'new', description: 'Новая сессия' },
         { command: 'workspaces', description: 'Проекты' },
+        { command: 'mode', description: 'Режим доступа этой сессии' },
         { command: 'stop', description: 'Прервать текущий ход' },
         { command: 'status', description: 'Состояние трансляции' },
         { command: 'help', description: 'Что я понимаю' },
@@ -338,9 +392,25 @@ export function apply(ctx, initial) {
           onCallback: async (tap) => {
             const token = await getToken(ref)
             if (token === undefined || token.length === 0) return
+            // An answer to something the harness asked settles itself: the desk
+            // rewrites its own message, so nothing more is sent here.
+            if (desk.owns(tap.data)) {
+              const settled = await desk.tap(tap).catch((error) => {
+                note(error)
+                return { answer: 'Не получилось' }
+              })
+              await callTelegram(token, 'answerCallbackQuery', {
+                callback_query_id: tap.id,
+                ...(settled.answer === undefined ? {} : { text: settled.answer }),
+              }).catch(() => {})
+              return
+            }
             let outcome = {}
             try {
-              outcome = await handleCallback(tap, { ...controlDeps, chat: tap })
+              outcome = await handleCallback(
+                { ...tap, threadSession: threadSessions.get(`${tap.chatId}:${tap.threadId ?? ''}`) },
+                { ...controlDeps, chat: tap },
+              )
             } catch (error) {
               note(error)
               outcome = { answer: 'Не получилось' }
@@ -372,6 +442,9 @@ export function apply(ctx, initial) {
           },
           onMessage: async (chat) => {
             try {
+              // A typed answer to a question with an "own answer" button belongs
+              // to that question, not to the session as a new instruction.
+              if (await desk.text(chat.id, chat.threadId, chat.text)) return undefined
               return await handleMessage({
                 text: chat.text,
                 photo: chat.photo,
@@ -512,13 +585,24 @@ export function apply(ctx, initial) {
   const runViews = new Map()
   const viewKey = (target, session) => `${target.destination.id}:${session.id}`
 
-  /** Prompts this bridge sent, so the harness echoing them back is suppressed. */
+  /**
+   * Prompts this bridge sent, so the harness echoing them back is suppressed.
+   *
+   * A fingerprint has to outlive the QUEUE, not the request: a message written
+   * while the agent is still working is committed only when its turn starts,
+   * which on a long run is many minutes later. The first version expired after
+   * a minute, and those late commits came back as an echo of what the operator
+   * had already sent — under the answer, which read like the bot talking to
+   * itself.
+   */
   const ownPrompts = new Map()
+  const PROMPT_MEMORY_MS = 6 * 3600_000
   const rememberOwnPrompt = (sessionId, text) => {
     const key = `${sessionId}:${text.trim()}`
     ownPrompts.set(key, Date.now())
-    // A fingerprint is only interesting until the harness commits the message.
-    for (const [old, at] of ownPrompts) if (Date.now() - at > 60_000) ownPrompts.delete(old)
+    for (const [old, at] of ownPrompts) if (Date.now() - at > PROMPT_MEMORY_MS) ownPrompts.delete(old)
+    // A queue this long is not a queue any more; drop the oldest instead of growing.
+    while (ownPrompts.size > 500) ownPrompts.delete(ownPrompts.keys().next().value)
   }
   const isOwnPrompt = (sessionId, text) => {
     const key = `${sessionId}:${String(text).trim()}`
@@ -631,6 +715,87 @@ export function apply(ctx, initial) {
     }
     return state.opening
   }
+
+  // ── stopping to ask: approvals and questions as buttons in the thread ─────
+  //
+  // Both are Cordis waterfalls: an answerer either claims the request or hands
+  // it on with `next()`. This bridge does BOTH — it puts the question in the
+  // Telegram thread and passes the request along — then takes whichever answer
+  // arrives first. So a question can be answered on the phone or in the browser,
+  // whichever is closer, and the screen that lost says where it went.
+  const desk = new AskDesk({
+    post: (place, text, keyboard) => place.client.postTracked(text, place.threadId, { keyboard }),
+    edit: (place, messageId, text, keyboard) => place.client.edit(messageId, text, place.threadId, { keyboard }),
+  })
+
+  /** Where a session is talked to: the first live destination, in its thread. */
+  const placeFor = async (session) => {
+    for (const target of targets.values()) {
+      const client = await clientFor(target)
+      if (client === undefined) continue
+      return { chatId: target.destination.chatId, client, threadId: await threadFor(target, client, session) }
+    }
+    return undefined
+  }
+
+  /** A promise that never settles: the losing side of a race must not decide it. */
+  const never = () => new Promise(() => {})
+
+  const whenAborted = (signal, value) => (signal === undefined
+    ? never()
+    : new Promise((resolve) => {
+      if (signal.aborted) resolve(value)
+      else signal.addEventListener('abort', () => resolve(value), { once: true })
+    }))
+
+  const askInTelegram = async (session, open) => {
+    if (targets.size === 0) return undefined
+    try {
+      const place = await placeFor(session)
+      return place === undefined ? undefined : await open(place)
+    } catch (error) {
+      note(error)
+      return undefined
+    }
+  }
+
+  ctx.on('approval/request', async (request, next) => {
+    const pending = await askInTelegram(request.agent?.session, (place) => desk.approval(place, request))
+    if (pending === undefined) return next()
+    // With no other answerer composed the waterfall falls through to the
+    // fail-closed 'unavailable'. That is not an answer, so it must not win the
+    // race — otherwise the buttons would be dead the moment they appeared.
+    const elsewhere = Promise.resolve(next()).then(
+      (outcome) => (outcome === 'unavailable' ? never() : outcome),
+      (error) => {
+        note(error)
+        return never()
+      },
+    )
+    const outcome = await Promise.race([pending.promise, elsewhere, whenAborted(request.signal, 'cancelled')])
+    desk.close(pending.id, outcome === 'cancelled' ? '⏹ Запрос отозван' : '✔️ Решено в веб-интерфейсе')
+    return outcome
+  })
+
+  const ABORTED = Symbol('aborted')
+
+  ctx.on('user-questions/request', async (request, next) => {
+    const pending = await askInTelegram(request.agent?.session, (place) => desk.question(place, request.questions))
+    if (pending === undefined) return next()
+    const elsewhere = Promise.resolve(next()).then(
+      (answer) => answer,
+      // A rejection here is the chain saying nobody answered (NO_PROVIDER) —
+      // the buttons stay live.
+      () => never(),
+    )
+    const answer = await Promise.race([pending.promise, elsewhere, whenAborted(request.signal, ABORTED)])
+    if (answer === ABORTED) {
+      desk.close(pending.id, '⏹ Вопрос отозван')
+      throw new Error('ask_user_question was aborted before the user answered')
+    }
+    desk.close(pending.id, '✔️ Отвечено в веб-интерфейсе')
+    return answer
+  })
 
   // ── run boundaries ────────────────────────────────────────────────────────
   const runs = new WeakMap()
