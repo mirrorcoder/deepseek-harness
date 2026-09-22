@@ -1,0 +1,5 @@
+# Host-plane row: notes are a property of the machine and its workspaces, not
+# of one agent preset.
+- insert:
+    - id: ext-memory
+      name: dsh-ext-memory

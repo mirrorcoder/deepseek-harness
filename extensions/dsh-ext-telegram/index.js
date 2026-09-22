@@ -709,6 +709,11 @@ export function apply(ctx, initial) {
         else {
           threadSessions.set(`${target.destination.chatId}:${id}`, session.id)
           adoptedThreads.set(`${target.destination.id}:${session.id}`, id)
+          // Persist on CREATE, not only when the operator writes in it. An
+          // unremembered topic cannot be cleaned up afterwards: Telegram has no
+          // way to list a private chat's topics, so a thread id this process
+          // forgets is a thread nobody can ever delete but by hand.
+          void saveThreads(target.destination.chatId, id, session.id)
         }
         return id
       })
@@ -898,6 +903,47 @@ export function apply(ctx, initial) {
       },
       envDestination: () => envDestination(process.env),
       reload: rebuild,
+      threads: async () => {
+        const rows = scope?.get()?.threads ?? []
+        const controller = ctx.get('sessionController')
+        let items = []
+        if (controller !== undefined) {
+          try {
+            items = (await controller.list({}, new AbortController().signal)).items
+          } catch (error) {
+            note(error)
+          }
+        }
+        const byId = new Map(items.map((item) => [item.sessionId, item]))
+        return rows.map((row) => {
+          const item = byId.get(row.sessionId)
+          return {
+            chatId: String(row.chatId),
+            threadId: row.threadId,
+            sessionId: row.sessionId,
+            title: item?.title ?? null,
+            updatedAt: item?.updatedAt ?? null,
+            blank: item?.blank ?? null,
+            known: item !== undefined,
+          }
+        })
+      },
+      closeThread: async (chatId, threadId) => {
+        const target = [...targets.values()].find((t) => String(t.destination.chatId) === String(chatId))
+        if (target === undefined) throw new Error(`no destination for chat ${chatId}`)
+        const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
+        const token = await getToken(ref)
+        if (token === undefined || token.length === 0) throw new Error('this bot has no token stored')
+        await callTelegram(token, 'deleteForumTopic', { chat_id: chatId, message_thread_id: threadId })
+        // Forget it here too, or the next broadcast writes into a topic that no
+        // longer exists and the outbox reports one failure per line.
+        const rows = scope?.get()?.threads ?? []
+        const kept = rows.filter((row) => !(String(row.chatId) === String(chatId) && row.threadId === threadId))
+        if (scope !== undefined) await scope.update({ threads: kept })
+        for (const [key, value] of adoptedThreads) if (value === threadId) adoptedThreads.delete(key)
+        threadSessions.delete(`${chatId}:${threadId}`)
+        return { closed: threadId }
+      },
     })
 
     // Fetch routes are EXACT paths — a wildcard matches nothing — so each

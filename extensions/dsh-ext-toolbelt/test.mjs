@@ -25,6 +25,7 @@ const MEASURED = {
   mcp__memory__open_nodes: 83,
   get_goal: 80,
   mcp__memory__read_graph: 45,
+  forget: 210,
   job_list: 42,
   session_search: 260,
   session_trace: 120,
@@ -35,7 +36,7 @@ test('the hidden groups are the ones that actually cost something', () => {
   const hidden = Object.keys(DEFAULT_GROUPS)
   const names = toolsOf(DEFAULT_GROUPS, hidden)
   const saved = names.reduce((sum, tool) => sum + (MEASURED[tool] ?? 0), 0)
-  assert.equal(names.length, 23)
+  assert.equal(names.length, 24)
   assert.ok(saved > 5000, `hiding these must save real tokens, got ${saved}`)
   // every hidden name is one that was really in the request header
   for (const tool of names) assert.ok(MEASURED[tool] !== undefined, `${tool} is not a tool this deployment has`)
@@ -45,7 +46,9 @@ test('the everyday surface is never hidden', () => {
   const hiddenNames = new Set(toolsOf(DEFAULT_GROUPS, Object.keys(DEFAULT_GROUPS)))
   for (const tool of ['read', 'write', 'edit', 'grep', 'glob', 'bash', 'todo_write', 'subagent', 'web_search', 'generate_image', 'skill',
     // the recall pair every compaction checkpoint promises is available
-    'session_event_search', 'session_event_read']) {
+    'session_event_search', 'session_event_read',
+    // delegation and the memory WRITE path must never need unlocking first
+    'explore', 'review', 'remember']) {
     assert.equal(hiddenNames.has(tool), false, `${tool} must stay loaded`)
   }
 })

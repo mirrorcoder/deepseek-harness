@@ -22,8 +22,9 @@ export const DEFAULT_GROUPS = {
   },
   memory: {
     title: 'долгая память',
-    why: 'помнить факты между сессиями: граф сущностей и связей',
+    why: 'граф сущностей и связей + удаление сохранённых заметок (сами заметки уже в системном промпте, а `remember` всегда под рукой)',
     tools: [
+      'forget',
       'mcp__memory__create_entities', 'mcp__memory__create_relations', 'mcp__memory__add_observations',
       'mcp__memory__delete_entities', 'mcp__memory__delete_relations', 'mcp__memory__delete_observations',
       'mcp__memory__read_graph', 'mcp__memory__search_nodes', 'mcp__memory__open_nodes',

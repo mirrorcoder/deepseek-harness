@@ -16,6 +16,69 @@ import { readFileSync, writeFileSync } from 'node:fs'
 /** The pruner's budget once history can be paged back in. */
 export const PRUNE = { thresholdChars: 4096, headChars: 2048, tailChars: 512 }
 
+
+/**
+ * Specialised delegates, mounted beside the generic `subagent`.
+ *
+ * The cheapest context is the one that never enters the parent. A repository
+ * sweep that reads thirty files costs the parent thirty file dumps it will
+ * carry to the end of the session; run in a child it costs one paragraph. Each
+ * row is one `tool-subagent` instance: its own tool name, its own persona, its
+ * own tool filter. The model route is deliberately NOT pinned — the child
+ * inherits the parent's, so a deployment that switches models does not have to
+ * remember these rows.
+ */
+const DELEGATE_ROWS = `
+    # ── specialised delegates (added by deploy/preset-pro.mjs) ─────────────
+    - id: tool-subagent-explore
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: explore
+        backgroundMode: one-shot
+        persona: >-
+          You are a search agent working for another agent, not for a human.
+          You read and report; you never edit, never run commands, never plan.
+          Answer with the conclusion first, then the evidence as file:line
+          references. Quote at most a few lines per file: the parent has a
+          context window to protect and cannot receive file dumps. If the
+          answer is not there, say so plainly and name where you looked.
+        toolFilter:
+          allow:
+            - read
+            - grep
+            - glob
+            - read_image
+            - find_projects
+            - session_event_search
+            - session_event_read
+            - web_search
+            - web_fetch
+
+    - id: tool-subagent-review
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: review
+        backgroundMode: one-shot
+        persona: >-
+          You are a reviewer working for another agent. Judge correctness
+          first, then clarity; skip anything a formatter would settle. Every
+          finding names file:line, states the concrete failure as inputs to
+          wrong behaviour, and says how sure you are. Report what matters and
+          nothing else: "nothing wrong found" is a complete answer. Do not
+          rewrite the code, and do not repeat the diff back.
+        toolFilter:
+          allow:
+            - read
+            - grep
+            - glob
+            - bash
+            - session_event_search
+            - session_event_read
+            - web_search
+`
+
 const RECALL_ROW = `
 # ── recall (added by deploy/preset-pro.mjs) ─────────────────────────────────
 #
@@ -62,6 +125,17 @@ export function patchPreset(text, options = {}) {
     patchedTail = patchedTail.replace(line, `$1${value}`)
   }
   out = out.slice(0, prunerAt) + patchedTail
+
+  // The delegates sit in the same group as the generic subagent tool, which is
+  // where the provider and its realm live.
+  const forkAnchor = "        toolName: subagent_fork\n        backgroundMode: continuable\n"
+  if (!out.includes(forkAnchor)) {
+    throw new Error('the subagent-fork row is not where it was — refusing to guess where delegates belong')
+  }
+  if (out.includes('toolName: explore')) {
+    throw new Error('the preset already carries an explore delegate — refusing to add a second')
+  }
+  out = out.replace(forkAnchor, `${forkAnchor}${DELEGATE_ROWS}`)
 
   if (options.recall === true) {
     if (out.includes('dsh-tool-session-query')) {

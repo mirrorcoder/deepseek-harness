@@ -12,6 +12,43 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.18.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Two ways to keep context out of the window instead of compressing it after the
+fact.
+
+- **Specialised delegates** (`explore`, `review`). The cheapest context is the
+  one that never enters the parent: a sweep that reads thirty files costs the
+  parent thirty file dumps it carries to the end of the session, but costs one
+  paragraph when a child reads them. `explore` is read-only by tool filter and
+  answers with a conclusion plus `file:line` evidence; `review` may run tests
+  and answers with findings or with "nothing wrong found". Neither pins a model:
+  the child inherits the parent's route, so switching models does not strand a
+  preset row.
+- **Memory across sessions** (`dsh-ext-memory`). Durable notes under
+  `$DSH_HOME/memory`, one directory per workspace plus a global one, loaded into
+  the system prompt at session start. `remember` writes one, `forget` removes
+  one or lists what is stored. The snapshot is taken at the FIRST prompt
+  assembly and never recomputed inside a session: the system prompt is the head
+  of every request, so a section that changes mid-conversation invalidates the
+  provider's prefix cache for all of it. A note written now therefore lands in
+  the next session, and the tool says so rather than quietly rewriting the head
+  of this one.
+- **Two skills** encoding the discipline: when to delegate and how to phrase a
+  child's instruction, and what belongs in memory versus in a checkpoint versus
+  in the searchable log.
+- **Topics are remembered when they are opened, not when they are written in,
+  and can be closed from the command line** (`deploy/telegram.sh topics`,
+  `topic-close <threadId>`). Telegram cannot list a private chat's topics, so a
+  thread id the process forgets is a thread nobody can delete except by hand —
+  which is exactly what a few test runs left behind.
+- **Deploys clean up after themselves.** `update.sh` prunes the build cache when
+  free space is under 4 GB before building, then drops the superseded image tag
+  and reports disk occupancy after. The box has run out of space mid-deploy
+  twice, and an ENOSPC during a build leaves a container that cannot restart.
+
 ## v1.17.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

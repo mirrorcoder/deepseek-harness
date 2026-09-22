@@ -25,6 +25,25 @@ export function createHandlers(deps) {
   }
 
   return {
+    /**
+     * Every topic this bridge has opened, with what the session behind it is.
+     * Telegram cannot list a private chat's topics, so this list is the only
+     * inventory there is — and the only way to clean up after a test run.
+     */
+    async threads() {
+      if (deps.threads === undefined) return json({ threads: [] })
+      return json({ threads: await deps.threads() })
+    },
+
+    /** Delete one topic and forget it. */
+    async closeThread(body) {
+      if (deps.closeThread === undefined) throw new Error('this build cannot close topics')
+      const chatId = String(body?.chatId ?? '')
+      const threadId = Number(body?.threadId)
+      if (chatId.length === 0 || !Number.isInteger(threadId)) throw new Error('chatId and threadId are required')
+      return json(await deps.closeThread(chatId, threadId))
+    },
+
     /** Everything the panel renders, tokens reduced to a yes/no. */
     async state() {
       const list = await deps.list()

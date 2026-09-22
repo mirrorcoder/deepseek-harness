@@ -6,6 +6,8 @@
 #   deploy/telegram.sh use <chat_id> # store the target and redeploy
 #   deploy/telegram.sh test          # send one message to the configured chat
 #   deploy/telegram.sh show          # current wiring, without printing secrets
+#   deploy/telegram.sh topics        # every topic the bridge has opened
+#   deploy/telegram.sh topic-close <threadId>   # delete one topic and forget it
 #
 # Write to the bot in Telegram first (/start), or add it to a group, otherwise
 # `discover` has nothing to show: a bot cannot open a conversation itself.
@@ -25,7 +27,38 @@ put() { # put VAR VALUE — replace or append in .env, 0600
   chmod 600 .env
 }
 
+# The panel's own routes sit behind the harness session cookie, so a CLI call
+# exchanges the launch token for one first. Everything runs inside the
+# container: no port is exposed and no secret reaches the host shell.
+panel() { # panel <route> <json>
+  tok="$(docker logs dsh 2>&1 | grep -o 'token=[A-Za-z0-9_.-]*' | tail -1 | cut -d= -f2)"
+  [ -n "$tok" ] || { echo "!! no launch token in the container log" >&2; exit 2; }
+  docker exec dsh sh -lc "curl -s -c /tmp/tgcj -o /dev/null 'http://127.0.0.1:3080/?token=$tok'; curl -s -b /tmp/tgcj -X POST 'http://127.0.0.1:3080/api/telegram/$1' -H 'content-type: application/json' -d '$2'"
+}
+
 case "${1:-show}" in
+topics)
+  panel threads '{}' | docker exec -i dsh node -e '
+    let raw = ""
+    process.stdin.on("data", (c) => { raw += c })
+    process.stdin.on("end", () => {
+      let rows = []
+      try { rows = JSON.parse(raw).threads ?? [] } catch { console.log(raw); return }
+      if (rows.length === 0) { console.log("Ни одного запомненного топика."); return }
+      for (const row of rows) {
+        const when = row.updatedAt ? new Date(row.updatedAt).toISOString().slice(0, 16).replace("T", " ") : "—"
+        console.log(`${String(row.threadId).padEnd(9)} ${row.known ? "" : "(сессии нет) "}${row.title ?? row.sessionId}   ${when}`)
+      }
+      console.log("\nУдалить:  deploy/telegram.sh topic-close <threadId>")
+    })'
+  ;;
+topic-close)
+  [ -n "${2:-}" ] || { echo "!! usage: deploy/telegram.sh topic-close <threadId>" >&2; exit 2; }
+  chat_id="$(panel threads '{}' | sed -n "s/.*\"chatId\":\"\([0-9-]*\)\".*/\1/p" | head -1)"
+  [ -n "$chat_id" ] || { echo "!! no remembered topics, so nothing to close" >&2; exit 2; }
+  panel closeThread "{\"chatId\":\"$chat_id\",\"threadId\":$2}"
+  echo ""
+  ;;
 token)
   [ -t 0 ] && { echo "!! pipe the token in so it stays out of the shell history:" >&2; echo "   printf '%s' '123456:AA…' | deploy/telegram.sh token" >&2; exit 2; }
   value="$(cat | tr -d ' \n\r')"

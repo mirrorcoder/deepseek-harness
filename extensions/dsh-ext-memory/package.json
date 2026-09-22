@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-memory",
+  "version": "0.1.0",
+  "description": "Memory across sessions: durable notes per workspace, loaded into the system prompt at session start",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "notes.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}
