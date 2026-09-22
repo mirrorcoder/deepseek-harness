@@ -197,7 +197,22 @@ export function apply(ctx, initial) {
     create: async (cwd) => {
       const controller = ctx.get('sessionController')
       if (controller === undefined) throw new Error('session controller is not mounted')
-      const created = await controller.create(cwd === undefined ? {} : { cwd })
+      // Register the directory as a workspace first. A session created with a
+      // bare `cwd` is real but unattached, so the sidebar files it under
+      // "несгруппированные" while its Telegram thread already names the
+      // project. `create` is idempotent by canonical path: an existing
+      // workspace is returned untouched.
+      const path = cwd ?? process.cwd()
+      let workspaceId
+      const registry = ctx.get('workspaceRegistry')
+      if (registry !== undefined) {
+        try {
+          workspaceId = (await registry.create(path)).id
+        } catch (error) {
+          note(error)
+        }
+      }
+      const created = await controller.create(workspaceId === undefined ? { cwd: path } : { workspaceId })
       return created.sessionId
     },
     prompt: async (sessionId, text, message) => {
