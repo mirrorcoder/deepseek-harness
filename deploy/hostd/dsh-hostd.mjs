@@ -81,6 +81,11 @@ function runCommand(request) {
     let stdout = ''
     let stderr = ''
     let timedOut = false
+    // Decode at the stream, not by concatenation: a chunk boundary in the
+    // middle of a multi-byte character would otherwise land in the transcript
+    // as a replacement glyph.
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
     child.stdout.on('data', (chunk) => {
       if (stdout.length < MAX_OUTPUT * 2) stdout += chunk
     })
@@ -128,9 +133,12 @@ async function handle(request) {
       if (typeof request.command !== 'string' || request.command.trim().length === 0) {
         return { ok: false, error: 'команда пустая' }
       }
+      // Written BEFORE the command runs: an audit trail that only records what
+      // finished is no trail at all for the command that took the machine down.
+      await audit({ op: 'exec', cwd: request.cwd, command: request.command })
       const result = await runCommand(request)
       await audit({
-        op: 'exec',
+        op: 'exec-done',
         cwd: result.cwd ?? request.cwd,
         command: request.command,
         exitCode: result.exitCode,
@@ -146,6 +154,13 @@ async function handle(request) {
 
 async function main() {
   await mkdir(dirname(SOCKET), { recursive: true, mode: 0o750 })
+  // The container's user must be able to traverse the directory, or the socket
+  // inside it is unreachable no matter what its own mode says.
+  try {
+    chownSync(dirname(SOCKET), SOCKET_UID, SOCKET_GID)
+  } catch {
+    // a uid that does not exist here: the operator's own chown then applies
+  }
   // A socket left behind by a crash would make bind() fail; a live one means a
   // second daemon, which must not happen quietly.
   try {

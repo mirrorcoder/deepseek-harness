@@ -58,6 +58,11 @@ status() {
 case "${1:-status}" in
   on)
     mkdir -p "$SOCKET_DIR" "$EMPTY_DIR"
+    # The container's `node` user is uid 1000 and has to TRAVERSE this directory
+    # to reach the socket inside it; a root-owned 0750 directory would leave the
+    # gateway unreachable with a permission error that looks like a bug in the
+    # harness. Root still writes here regardless of the owner.
+    chown 1000:1000 "$SOCKET_DIR"
     chmod 750 "$SOCKET_DIR"
     say "→ ставлю шлюз команд на хост"
     mkdir -p "$LIB"

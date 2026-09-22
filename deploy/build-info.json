@@ -1,5 +1,5 @@
 {
-  "forkVersion": "1.15.0",
+  "forkVersion": "1.16.0",
   "upstreamBase": "dsh-v0.1.5-rc.2",
   "upstreamNpm": "0.1.5-rc.2",
   "releasedAt": "2026-09-22",
@@ -9,6 +9,7 @@
     "dsh-ext-about": "0.1.0",
     "dsh-ext-compaction-pro": "0.1.0",
     "dsh-ext-efficiency": "0.1.0",
+    "dsh-ext-host": "0.1.0",
     "dsh-ext-image-gen": "0.1.0",
     "dsh-ext-peak-guard": "0.1.0",
     "dsh-ext-remote-console": "0.1.0",
