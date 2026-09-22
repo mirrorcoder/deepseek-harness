@@ -9,7 +9,17 @@ ARG DSH_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN npm install -g --no-audit --no-fund "@deepseek-ai/dsh@${DSH_VERSION}"
+# Installed through a manifest rather than `npm install -g` for one reason: the
+# published tree is currently unresolvable. `@deepseek-ai/dsh-web-app@0.1.5-rc.3`
+# requires `dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3`, which was never
+# published — the registry jumps from rc.2 to 0.1.6-alpha.1 — so a plain install
+# of rc.2 fails with ETARGET as soon as npm resolves that sub-dependency to
+# rc.3. rc.3 itself fails the same way. The override pins that one package to
+# the version that exists; everything else resolves normally. Remove it once
+# upstream publishes a consistent tree.
+WORKDIR /opt/dsh-runtime
+RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s"},"overrides":{"@deepseek-ai/dsh-client-ui-sidebar-documentpreview":"0.1.5-rc.2"}}' "${DSH_VERSION}" > package.json \
+ && npm install --no-audit --no-fund
 # MCP servers switched on by deploy/features.patch.yml (stdio, launched by dsh).
 RUN npm install -g --no-audit --no-fund \
       @modelcontextprotocol/server-memory \
@@ -33,9 +43,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-audit --no-fund pnpm@11.7.0
 COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=build /opt/dsh-runtime /opt/dsh-runtime
 # npm's bin entries are symlinks; COPY would flatten them into files outside
 # node_modules and break package resolution — recreate the links instead.
-RUN ln -s /usr/local/lib/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin/dsh \
+RUN ln -s /opt/dsh-runtime/node_modules/@deepseek-ai/dsh/lib/bin.js /usr/local/bin/dsh \
  && ln -s /usr/local/lib/node_modules/@modelcontextprotocol/server-memory/dist/index.js /usr/local/bin/mcp-server-memory \
  && ln -s /usr/local/lib/node_modules/@upstash/context7-mcp/dist/index.js /usr/local/bin/context7-mcp \
  && ln -s /usr/local/lib/node_modules/@modelcontextprotocol/server-sequential-thinking/dist/index.js /usr/local/bin/mcp-server-sequential-thinking \
