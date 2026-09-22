@@ -12,6 +12,39 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.16.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Host access** (`dsh-ext-host`, `deploy/host-access.sh`, `deploy/hostd/`).
+  A containerised harness sees a slice of the world: its own workspace, no host
+  docker, no host disk. This release lends that boundary out, behind a switch
+  that ships off.
+  - `find_projects` walks the mounted host disk and reports what looks like a
+    project — a git repository, a compose file, a language manifest — stopping
+    at the first marker on a branch and staying out of `node_modules` and
+    friends. Both names of every directory come back: the host's and the one
+    the harness reads it at.
+  - `add_workspace` registers any of them as a workspace, so a session can be
+    opened in it from the sidebar or from Telegram. A directory that is really
+    the mounted workspace keeps its `/workspace/...` name instead of acquiring
+    a second one — two names for one directory is how a session ends up split.
+  - `host_bash` runs a command on the host as root through a unix-socket
+    gateway (`deploy/hostd/dsh-hostd.mjs`, a systemd service). That is how
+    containers get created, stacks restarted, services inspected. Every call is
+    appended to `/var/log/dsh-hostd.log` before it runs.
+  - The switch is `Settings → host → enabled`: with it off no tool is
+    registered at all, so the schemas cost nothing and there is no path across
+    the boundary. `deploy/host-access.sh on|off|status` does the plumbing —
+    the `/host` mount and the gateway service.
+  - `host_bash` asks for approval before each call unless the session runs
+    under the full-access preset (`Settings → host → confirm`). The gate is a
+    `tools/pre-execute` decision, so the harness owns the audit pair and the
+    cancellation, and the question surfaces wherever the operator is —
+    including as Telegram buttons. Under a policy of `never` the gate steps
+    aside rather than asking: the approval service rejects every request in
+    that mode, so asking would block exactly the mode chosen to be open.
+
 ## v1.15.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-host",
+  "version": "0.1.0",
+  "description": "Host access: the machine the harness runs on — its projects, its workspaces and its shell — behind one switch in Settings",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "gateway.js", "paths.js", "scan.js", "report.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

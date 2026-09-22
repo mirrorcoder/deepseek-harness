@@ -41,6 +41,14 @@ services:
       - ${DSH_DATA_DIR:-/root/dsh-data}/workspace:/workspace
       # unix socket published by dsh-imggw-bridge
       - ${DSH_DATA_DIR:-/root/dsh-data}/run:/run/imggw
+      # ── host access (dsh-ext-host) ──────────────────────────────────────
+      # The host's disk, so read/edit/grep work on the machine itself. The
+      # DEFAULT points at an empty directory: host access is opt-in, and
+      # `deploy/host-access.sh on` is what repoints it at `/`.
+      - ${DSH_HOST_ROOT:-/root/dsh-data/no-host}:/host:rw
+      # Socket of the host command gateway (deploy/hostd). Absent until that
+      # service is installed, which is the same switch.
+      - ${DSH_DATA_DIR:-/root/dsh-data}/run-host:/run/dsh-host
     ports:
       - "127.0.0.1:3080:3080"
     networks:

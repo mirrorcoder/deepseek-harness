@@ -36,6 +36,7 @@ clone it and pull updates.
 | `dsh-ext-telegram` | Mirrors every session into Telegram as its own topic: ask, answer, tool lines, approvals, errors, completion ping. `/tg` tests it. | `deploy/telegram.sh`, then its row's `config` (`mode`, `tools`, `minRunSeconds`) |
 | `dsh-ext-about` | An `i` button opening a panel: fork version, upstream base, installed extensions, and the release history parsed from `CHANGELOG.md` (baked into the image). | `enabled`, `maxReleases` in its bundle patch |
 | `dsh-ext-efficiency` | Replaces byte-identical repeats of the same tool call with a one-line hash pointer, keeps prefix-cache accounting, and adds `/context` (window occupancy, distance to compaction, cache-hit ratio, dedup savings). | its row's `config` (`minChars`, `minSavingChars`, `excludeTools`) |
+| `dsh-ext-host` | Host access: `find_projects` (what is on this machine), `add_workspace` (make any directory a workspace), `host_bash` (a command on the host through the gateway). Ships OFF and registers no tool until the switch is on. | `settings.yaml` → `host:` (live), plumbing via `deploy/host-access.sh` |
 | `dsh-ext-remote-console` | Declares this deployment's authenticated page an operator console, so the Settings pages persist to the harness home over the public URL instead of the browser tab. Ships off; this deployment's patch turns it on. | `enabled` in its bundle patch |
 
 Each package has a `test.mjs` runnable inside the container with `node --test`
@@ -70,6 +71,49 @@ profile closure). `update.sh` runs them.
     reports what is configured without printing secrets.
 * The agent's workspace is `/root/dsh-data/workspace` (container `/workspace`);
   it contains a clone of this fork so the harness can work on itself.
+
+## Host access (off by default)
+
+The harness runs in a container, so by default it can only see its own
+workspace: no host disk, no host docker, no host services. `deploy/host-access.sh`
+lends that boundary out, in two pieces that can be used separately.
+
+```sh
+deploy/host-access.sh status   # what is on right now
+deploy/host-access.sh on       # mount / at /host, install + start the gateway
+deploy/host-access.sh off      # reverse both
+```
+
+* **The disk.** `DSH_HOST_ROOT` decides what is mounted at `/host` inside the
+  container; it defaults to an empty directory, and `on` repoints it at `/`.
+  With it mounted, the ordinary read/edit/grep/glob tools work on every file of
+  the machine, `find_projects` reports what looks like a project, and
+  `add_workspace` registers one so sessions can be opened in it — from the
+  sidebar or from Telegram.
+* **The shell.** `deploy/hostd/dsh-hostd.mjs` runs on the host under systemd and
+  listens on a unix socket in `$DSH_DATA_DIR/run-host/`, which is bind-mounted
+  into the container. `host_bash` sends it a command; it runs it as root, in the
+  host's own world — docker, compose, systemctl, package manager — and hands
+  back stdout, stderr and the exit code. Every call is appended to
+  `/var/log/dsh-hostd.log` before it runs.
+
+Then the switch inside the harness: **Settings → host → enabled**. With it off
+no host tool is registered at all, so the schemas cost nothing in every request
+and there is no path across the boundary even with the mount in place.
+
+Be clear-eyed about what "on" means: the socket is the whole security boundary,
+and anything that can write to it can run anything on this machine. That is why
+the socket is owned by the container's user and mode 0660, why the service ships
+disabled, and why `host_bash` asks for approval before each call unless the
+session runs under the full-access preset (`Settings → host → confirm`:
+`outside-full-access` by default, `always`, or `never`). The question arrives
+wherever you are — in the browser, and as buttons in Telegram.
+
+Paths have two names and both are reported: `/root/aisignals` on the host is
+`/host/root/aisignals` inside the harness. `host_bash` takes host paths;
+the file tools take the `/host/...` ones. A directory that is really the
+mounted workspace keeps its `/workspace/...` name rather than acquiring a
+second one.
 
 ## Adding things without a rebuild
 

@@ -1,0 +1,23 @@
+[Unit]
+Description=dsh host access gateway (unix socket for the containerised harness)
+Documentation=https://github.com/mirrorcoder/deepseek-harness
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /usr/local/lib/dsh-hostd/dsh-hostd.mjs
+Environment=DSH_HOSTD_SOCKET=/root/dsh-data/run-host/hostd.sock
+# The uid the container's `node` user has; the socket is handed to it.
+Environment=DSH_HOSTD_UID=1000
+Environment=DSH_HOSTD_GID=1000
+Environment=DSH_HOSTD_AUDIT=/var/log/dsh-hostd.log
+Restart=on-failure
+RestartSec=2
+# The gateway's whole purpose is to act on this machine, so it is not confined;
+# the confinement that matters is the socket's ownership and the approval the
+# harness asks for before every call.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

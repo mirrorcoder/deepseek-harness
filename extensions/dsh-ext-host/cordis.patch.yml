@@ -1,0 +1,6 @@
+# Host-plane row. The plugin mounts always and registers NOTHING until
+# `host.enabled` is switched on in Settings — so composing it costs no tool
+# schemas and opens no path out of the container.
+- insert:
+    - id: ext-host
+      name: dsh-ext-host
