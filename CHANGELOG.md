@@ -12,6 +12,66 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.17.0 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+Compaction stops being loss and becomes paging.
+
+- **The checkpoint now says where the rest went.** Every compacted span is
+  still on disk event by event, so the checkpoint ends with the session id and
+  the two tools that read it back, plus the instruction to prefer one recall
+  call over one wrong assumption. The pointer is written only when the registry
+  really holds those tools: a promise the deployment cannot keep would cost a
+  wasted call at exactly the wrong moment.
+- **The recall tools are mounted** (`@deepseek-ai/dsh-tool-session-query`,
+  which upstream publishes separately and leaves out of the app's dependency
+  closure). `session_event_search` and `session_event_read` stay visible in
+  every request; the cross-session and lineage half (`session_search`,
+  `session_trace`, `session_event_trace`) goes into a new `history` group of
+  the toolbelt, hidden until asked for.
+- **Tool results are pruned harder** — 4096/2048/512 instead of 8192/4096/1024
+  — which is only defensible because the pruned middle is now recoverable.
+- **Every user message survives compaction.** The ledger carried the last ten
+  instructions, truncated at 400 characters; it now carries all of them up to a
+  24k budget, trimmed from the old end and saying so when it trims. What the
+  user asked is the specification of the work: it costs a fraction of one
+  pruned tool result and must never be paraphrased.
+- **Two more anchors in the ledger.** The plan exactly as the agent last wrote
+  it, and the most recent failed tool calls with their error text. A resumed
+  agent that has lost the plan or forgotten what was broken re-derives both
+  expensively, usually by repeating the failure.
+- **Compact later, keep more, write longer.** Thresholds move from 0.80/0.16 to
+  0.85/0.20 and the checkpoint cap from 8k to 16k. Compaction rewrites the head
+  of the conversation and so invalidates the provider's prefix cache for
+  everything after it; with a DeepSeek cache hit at a thirtieth of a miss, one
+  deep compaction is cheaper than two shallow ones — and twelve sections do not
+  fit in 8k.
+- Every edit to the shipped `standard` preset now lives in `deploy/preset-pro.mjs`,
+  anchored on text upstream really has, refusing rather than guessing when an
+  anchor is missing.
+
+## v1.16.1 — 2026-09-22
+
+Upstream base: `dsh-v0.1.5-rc.2`.
+
+- **Fixed: host access mounted nothing.** `find_projects` declared its output as
+  an array of bare objects, and the tool registry requires every object node to
+  say `additionalProperties` out loud. The schema threw while the plugin was
+  mounting — and a plugin that throws there mounts NOTHING: no tools, no
+  settings section, and in this build no logger to say so. The switch was on,
+  the gateway was running, and the harness had no host tools at all. The output
+  schemas now live in `schemas.js` with a test that holds them to the registry's
+  rule, and each registration is attempted on its own, reporting to stderr
+  instead of taking the plugin down.
+- **Fixed: the mounted host disk was unreadable.** The image runs as `node`
+  (uid 1000) and a host's interesting directories are 0700, so the file dialog
+  answered `EACCES: opendir '/host/root'` on the very directory the projects
+  live in. `deploy/host-access.sh on` now also runs the container as root
+  (`DSH_CONTAINER_USER`), and `off` puts it back and returns ownership of the
+  data directories to uid 1000 — anything written as root would be unreadable
+  the moment the harness stops being root.
+
 ## v1.16.0 — 2026-09-22
 
 Upstream base: `dsh-v0.1.5-rc.2`.

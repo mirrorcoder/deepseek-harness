@@ -28,6 +28,7 @@ import { askHost, digest } from './gateway.js'
 import { bothNames, normalize, toContainerPath, toHostPath } from './paths.js'
 import { findProjects } from './scan.js'
 import { approvalsOff, renderProjects, renderRun, stripUndefined } from './report.js'
+import { PROJECTS_SCHEMA, RUN_SCHEMA, WORKSPACE_SCHEMA } from './schemas.js'
 
 export const name = 'ext-host'
 export const inject = ['tools']
@@ -99,17 +100,7 @@ export function apply(ctx, initial) {
       timeout_seconds: { type: 'integer', description: `Deadline for this command; default ${config.timeoutSeconds}.` },
     },
     output: {
-      schema: {
-        type: 'object',
-        additionalProperties: true,
-        properties: {
-          exitCode: { type: 'integer' },
-          stdout: { type: 'string' },
-          stderr: { type: 'string' },
-          durationMs: { type: 'integer' },
-          timedOut: { type: 'boolean' },
-        },
-      },
+      schema: RUN_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: renderRun(value) }],
     },
     presentCall: (args) => ({ card: 'generic', title: `host: ${digest(args.command)}`, kind: 'command', rawInput: args }),
@@ -151,7 +142,7 @@ export function apply(ctx, initial) {
       limit: { type: 'integer', description: 'Maximum number of projects to return; default 60.' },
     },
     output: {
-      schema: { type: 'object', additionalProperties: true, properties: { projects: { type: 'array', items: { type: 'object' } } } },
+      schema: PROJECTS_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: renderProjects(value) }],
     },
     presentCall: (args) => ({ card: 'generic', title: `Проекты на хосте${args.root ? `: ${args.root}` : ''}`, kind: 'other', rawInput: args }),
@@ -185,7 +176,7 @@ export function apply(ctx, initial) {
       name: { type: 'string', description: 'Optional display name; defaults to the directory name.' },
     },
     output: {
-      schema: { type: 'object', additionalProperties: true, properties: { name: { type: 'string' }, path: { type: 'string' } } },
+      schema: WORKSPACE_SCHEMA,
       render: (_args, value) => [{ type: 'text', text: `Воркспейс «${value.name}» → ${value.path}${value.hostPath && value.hostPath !== value.path ? ` (на хосте ${value.hostPath})` : ''}` }],
     },
     presentCall: (args) => ({ card: 'generic', title: `Воркспейс: ${args.path}`, kind: 'other', rawInput: args }),
@@ -209,13 +200,28 @@ export function apply(ctx, initial) {
     },
   })
 
-  /** Re-judge what exists, after a settings change or at boot. */
+  /**
+   * Re-judge what exists, after a settings change or at boot.
+   *
+   * Each registration stands on its own. A tool that the registry refuses —
+   * a schema it will not accept, a name already taken — must not take the
+   * others down with it, and above all must not throw out of `apply`: a plugin
+   * that throws while mounting mounts NOTHING, and in this build no logger
+   * reports it. That is how host access once shipped switched-on and entirely
+   * absent: one nested object in one output schema.
+   */
   const sync = () => {
     clear()
     if (!config.enabled) return
-    registered.push(ctx.tools.register(hostBash()))
-    registered.push(ctx.tools.register(findProjectsTool()))
-    registered.push(ctx.tools.register(addWorkspaceTool()))
+    for (const build of [hostBash, findProjectsTool, addWorkspaceTool]) {
+      try {
+        registered.push(ctx.tools.register(build()))
+      } catch (error) {
+        // stderr, not ctx.logger: the logger is not available in this build and
+        // the container log is where an operator actually looks.
+        process.stderr.write(`ext-host: could not register a tool: ${error?.message ?? error}\n`)
+      }
+    }
   }
 
   // ── the gate: a command on the host asks first ────────────────────────────

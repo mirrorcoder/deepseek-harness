@@ -18,6 +18,12 @@ services:
     image: deepseek-harness:${FORK_VERSION:-local}
     container_name: dsh
     restart: unless-stopped
+    # The image runs as `node` (uid 1000). Host access flips this to root:
+    # the interesting directories on a host — /root above all — are 0700, so a
+    # uid-1000 harness sees the mount and cannot open a single project in it.
+    # `deploy/host-access.sh off` puts it back and returns ownership of the
+    # data directories to uid 1000.
+    user: ${DSH_CONTAINER_USER:-node}
     environment:
       DSH_TRUSTED_HOSTS: ${DSH_TRUSTED_HOSTS:?set in .env}
       TZ: ${TZ:-UTC}

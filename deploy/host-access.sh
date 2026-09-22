@@ -44,6 +44,7 @@ set_env() {
 status() {
   root="$(sh -c '. ./.env 2>/dev/null; echo "${DSH_HOST_ROOT:-'"$EMPTY_DIR"'}"')"
   say "монтирование хоста в /host : ${root}$([ "$root" = / ] && echo '  (включено)' || echo '  (выключено)')"
+  say "пользователь контейнера     : $(docker inspect dsh --format '{{.Config.User}}' 2>/dev/null || echo '?')"
   if systemctl is-active --quiet dsh-hostd 2>/dev/null; then
     say "шлюз команд dsh-hostd      : работает ($(systemctl show -p MainPID --value dsh-hostd))"
   else
@@ -73,6 +74,9 @@ case "${1:-status}" in
     systemctl enable --now dsh-hostd
     say "→ монтирую диск хоста в /host"
     set_env DSH_HOST_ROOT /
+    # Without this the mount is there and unreadable: /root and most of what
+    # matters on a host is 0700, and the harness runs as uid 1000.
+    set_env DSH_CONTAINER_USER root
     docker compose up -d dsh
     say "→ готово. Осталось включить тумблер: Settings → host → enabled"
     status
@@ -84,6 +88,11 @@ case "${1:-status}" in
     systemctl daemon-reload 2>/dev/null || true
     mkdir -p "$EMPTY_DIR"
     set_env DSH_HOST_ROOT "$EMPTY_DIR"
+    set_env DSH_CONTAINER_USER node
+    # Anything the harness wrote while it ran as root would be unreadable to
+    # uid 1000 the moment it stops being root — including its own sessions.
+    say "→ возвращаю владение данными пользователю контейнера"
+    chown -R 1000:1000 "${DATA_DIR}/data" "${DATA_DIR}/workspace" 2>/dev/null || true
     docker compose up -d dsh
     say "→ хост снова за границей контейнера"
     status

@@ -90,6 +90,12 @@ deploy/host-access.sh off      # reverse both
   the machine, `find_projects` reports what looks like a project, and
   `add_workspace` registers one so sessions can be opened in it — from the
   sidebar or from Telegram.
+* **Кто читает.** The image runs as `node` (uid 1000) and a host's interesting
+  directories are 0700, so a uid-1000 harness sees the mount and cannot open a
+  single project in it (`EACCES: opendir '/host/root'`). `on` therefore also
+  sets `DSH_CONTAINER_USER=root`; `off` puts it back and returns ownership of
+  `data/` and `workspace/` to uid 1000, because anything written as root would
+  be unreadable the moment the harness stops being root.
 * **The shell.** `deploy/hostd/dsh-hostd.mjs` runs on the host under systemd and
   listens on a unix socket in `$DSH_DATA_DIR/run-host/`, which is bind-mounted
   into the container. `host_bash` sends it a command; it runs it as root, in the

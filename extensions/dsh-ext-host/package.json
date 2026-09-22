@@ -5,7 +5,7 @@
   "type": "module",
   "main": "index.js",
   "license": "MIT",
-  "files": ["index.js", "gateway.js", "paths.js", "scan.js", "report.js", "cordis.patch.yml", "test.mjs"],
+  "files": ["index.js", "gateway.js", "paths.js", "scan.js", "report.js", "schemas.js", "cordis.patch.yml", "test.mjs"],
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",

@@ -29,21 +29,40 @@ const m = JSON.parse(require("fs").readFileSync(process.argv[1] + "/package.json
 console.log("   bundles:", m.dsh.profile.bundles.join(", "));
 ' "$PROFILE"
 
+# The recall tools (session_event_search / session_event_read) are published
+# outside the app's dependency closure, and an agent preset resolves plugin
+# names from the PROFILE — the image copy alone is not enough. Installed from
+# that copy rather than from the registry, so the version travels with the
+# image and the step needs no network. A failure here is not fatal: the preset
+# is then built without the row, which is a harness with no recall rather than
+# a harness that cannot open a session.
+RECALL_SRC="/opt/dsh-runtime/node_modules/@deepseek-ai/dsh-tool-session-query"
+RECALL_PKG="@deepseek-ai/dsh-tool-session-query"
+DSH_PRESET_RECALL=0
+if [ -d "$PROFILE/node_modules/$RECALL_PKG" ]; then
+  DSH_PRESET_RECALL=1
+elif [ -d "$RECALL_SRC" ] && dsh plugin --profile web add "file:$RECALL_SRC" >/dev/null 2>&1; then
+  DSH_PRESET_RECALL=1
+fi
+export DSH_PRESET_RECALL
+[ "$DSH_PRESET_RECALL" = "1" ] && echo "   ✓ recall tools (session_event_search / session_event_read)" \
+  || echo "   !! recall tools unavailable — the preset will be built without them" >&2
+
 echo "→ materialising agent preset: pro"
 SRC="$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard"
 [ -d "$SRC" ] || { echo "!! shipped standard preset not found at $SRC" >&2; exit 1; }
 DST="$DSH_HOME/.agent-presets/pro"
 mkdir -p "$DSH_HOME/.agent-presets"
 rm -rf "$DST.tmp" && cp -r "$SRC" "$DST.tmp"
-n="$(grep -c "name: '@deepseek-ai/dsh-compaction-basic'" "$DST.tmp/agent.cordis.yml" || true)"
-if [ "$n" != "1" ]; then
-  echo "!! expected exactly one compaction-basic row in the shipped standard preset, found $n — upstream changed, refusing to guess" >&2
+# Every edit to the shipped preset lives in one place, and each is anchored on
+# something upstream really says: compaction engine, pruning budget, recall row.
+node "${PRESET_PATCH:-/opt/dsh/preset-pro.mjs}" "$DST.tmp/agent.cordis.yml" || {
+  echo "!! could not patch the shipped standard preset — upstream changed" >&2
   rm -rf "$DST.tmp"; exit 1
-fi
-sed -i "s#name: '@deepseek-ai/dsh-compaction-basic'#name: dsh-ext-compaction-pro#" "$DST.tmp/agent.cordis.yml"
+}
 cat > "$DST.tmp/preset.yml" <<'EOF'
 name: Pro
-description: Standard coding agent + compaction-pro (structured checkpoints, touched-files ledger, map-reduce for long spans). generate_image, MCP, schedule and peak-guard come from the host plane.
+description: Standard coding agent + compaction-pro (structured checkpoints, verbatim user directives, live plan and failures as anchors, map-reduce for long spans) + session recall, so a compacted span can be read back event by event instead of being lost. generate_image, MCP, schedule and peak-guard come from the host plane.
 order: 0
 EOF
 rm -rf "$DST" && mv "$DST.tmp" "$DST"

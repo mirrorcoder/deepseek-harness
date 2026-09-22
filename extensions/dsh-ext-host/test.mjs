@@ -7,6 +7,7 @@ import { bothNames, isUnder, normalize, toContainerPath, toHostPath } from './pa
 import { MARKERS, SKIP, findProjects } from './scan.js'
 import { askHost, digest, explain } from './gateway.js'
 import { approvalsOff, renderProjects, renderRun, stripUndefined } from './report.js'
+import { PROJECTS_SCHEMA, RUN_SCHEMA, WORKSPACE_SCHEMA } from './schemas.js'
 
 const MAP = { hostRoot: '/host', workspaceMount: '/workspace', workspaceHostPath: '/root/dsh-data/workspace' }
 
@@ -191,4 +192,41 @@ test('a project list reads as a list of projects', () => {
   assert.match(text, /• uts — \/opt\/uts \[git, python\]/)
   assert.match(text, /обрезан/)
   assert.match(renderProjects({ projects: [] }), /не нашёл/)
+})
+
+/**
+ * The rule the tool registry enforces while the plugin mounts: every object
+ * node says `additionalProperties` out loud, every array declares its items.
+ * Breaking it threw out of `apply`, and a plugin that throws there mounts
+ * nothing at all — no tools, no settings section, and no logger to say so.
+ */
+function offences(schema, path = '$') {
+  const found = []
+  if (schema === null || typeof schema !== 'object') return found
+  if (schema.type === 'object') {
+    if (typeof schema.additionalProperties !== 'boolean') found.push(`${path}.additionalProperties`)
+    for (const [key, value] of Object.entries(schema.properties ?? {})) {
+      found.push(...offences(value, `${path}.${key}`))
+    }
+  }
+  if (schema.type === 'array') {
+    if (schema.items === undefined) found.push(`${path}.items`)
+    else found.push(...offences(schema.items, `${path}[]`))
+  }
+  return found
+}
+
+test('every output schema is one the tool registry will accept', () => {
+  for (const [name, schema] of [['host_bash', RUN_SCHEMA], ['find_projects', PROJECTS_SCHEMA], ['add_workspace', WORKSPACE_SCHEMA]]) {
+    assert.deepEqual(offences(schema), [], `${name}: схема не пройдёт проверку при монтировании`)
+  }
+})
+
+test('the guard itself catches the shape that broke the mount', () => {
+  // The exact schema that shipped: an array of objects with nothing said about
+  // their extra properties.
+  assert.deepEqual(
+    offences({ type: 'object', additionalProperties: true, properties: { projects: { type: 'array', items: { type: 'object' } } } }),
+    ['$.projects[].additionalProperties'],
+  )
 })

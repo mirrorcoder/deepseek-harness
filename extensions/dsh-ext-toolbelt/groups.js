@@ -34,11 +34,12 @@ export const DEFAULT_GROUPS = {
     why: 'параллельные подзадачи и циклы доводки (workflow, ralph)',
     tools: ['workflow', 'ralph'],
   },
-  schedule: {
-    title: 'расписание',
-    why: 'отложить работу или повторять её по времени',
-    tools: ['schedule_create', 'schedule_list', 'schedule_delete'],
-  },
+  // NOTE: schedule_create / schedule_list / schedule_delete are NOT here, and
+  // cannot be. `tools.restrict()` masks GLOBAL registrations only; the schedule
+  // plugin registers per session scope, and the registry answers "unknown
+  // global tool" for those names. Listing them here cost nothing and promised
+  // a saving that never happened — 459 tokens that look hidden and are not.
+  // (This was invisible until the extension started reporting refusals.)
   goals: {
     title: 'цели',
     why: 'вести формальную цель сессии',
@@ -48,6 +49,16 @@ export const DEFAULT_GROUPS = {
     title: 'фоновые задачи',
     why: 'смотреть и прерывать фоновые запуски',
     tools: ['job_list', 'job_output', 'job_kill'],
+  },
+  // NOTE: `session_event_search` and `session_event_read` are deliberately NOT
+  // here. Every compaction checkpoint tells the model those two exist and to
+  // reach for them instead of guessing; a recall path that must first be
+  // unlocked is a recall path that will not be used at the moment it matters.
+  // The three below are the cross-session and lineage half, which is rare.
+  history: {
+    title: 'поиск по прошлым сессиям',
+    why: 'найти работу в ДРУГИХ сессиях и разобрать связи событий (родословная, замены)',
+    tools: ['session_search', 'session_trace', 'session_event_trace'],
   },
 }
 

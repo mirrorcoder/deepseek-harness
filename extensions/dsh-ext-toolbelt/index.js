@@ -48,20 +48,27 @@ export function apply(ctx, config) {
    */
   const hideFor = (agent, names) => {
     const agentCtx = agent?.ctx
-    if (agentCtx?.tools?.restrict === undefined) return
+    if (agentCtx?.tools?.restrict === undefined) return []
     let held = restricted.get(agent)
     if (held === undefined) {
       held = new Map()
       restricted.set(agent, held)
     }
+    const missed = []
     for (const tool of names) {
       if (held.has(tool)) continue
       try {
         held.set(tool, agentCtx.tools.restrict({ deny: [tool] }))
-      } catch {
-        // Not a restrictable name in this composition: leave it visible.
+      } catch (error) {
+        // `restrict()` refuses a name that is not registered YET, and refuses a
+        // scoped registration by design. The first case is a race worth
+        // retrying; the second is permanent. Either way the name stays visible
+        // and paid for, so it is reported rather than swallowed.
+        missed.push(tool)
+        lastRefusal = `${tool}: ${error?.message ?? error}`
       }
     }
+    return missed
   }
 
   const revealFor = (agent, names) => {
@@ -82,9 +89,27 @@ export function apply(ctx, config) {
     return lifted
   }
 
+  /** The last name the registry refused to hide, surfaced by `enable_tools`. */
+  let lastRefusal
+
   ctx.on('agent/created', ({ agent }) => {
     if (hidden.length === 0) return
-    hideFor(agent, toolsOf(groups, hidden))
+    const missed = hideFor(agent, toolsOf(groups, hidden))
+    if (missed.length === 0) return
+    // A tool registered after the agent was created cannot be restricted at
+    // creation time. One retry when the agent actually starts working catches
+    // exactly that case, and costs nothing when there is nothing to catch.
+    const retry = () => {
+      const still = hideFor(agent, missed)
+      if (still.length > 0) {
+        process.stderr.write(`ext-toolbelt: still visible after retry: ${still.join(', ')} (${lastRefusal ?? 'no reason reported'})\n`)
+      }
+    }
+    const dispose = ctx.on('agent/status', (event) => {
+      if (event?.agent !== agent || event?.status !== 'running') return
+      dispose()
+      retry()
+    })
   })
 
   ctx.effect(() => ctx.tools.register(defineTool({

@@ -49,7 +49,7 @@ export function buildInstruction(ledger, opts = {}) {
     'Rules:',
     '- Concise English engineering prose. Preserve exact file paths, commands, error strings, identifiers, numeric values, function signatures and syntax fragments.',
     '- Capture user feedback and explicit instructions faithfully, especially corrections; the "User Directives" section quotes them verbatim.',
-    '- Every path and command in the ledger below must appear in the checkpoint.',
+    '- Every path, command, user instruction, plan item and failure in the ledger below must appear in the checkpoint; the ledger is not a hint, it is the floor.',
     '- Do NOT mention this summarization request or that the context was compacted.',
     '- Output only the checkpoint text: do not call any tool or take any other action.',
     `- If the conversation already contains a ${SUMMARY_OPEN_TAG} block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, merge newer information into one consolidated summary under the same structure.`,
@@ -65,6 +65,25 @@ export function buildMergeInstruction(parts) {
     'Output only the merged checkpoint text. Do not call any tool.',
     '',
     ...parts.flatMap((p, i) => [`### Part ${i + 1}`, p, '']),
+  ].join('\n')
+}
+
+/**
+ * The line that turns compaction from loss into paging.
+ *
+ * Everything this checkpoint condensed is still on disk, event by event, and
+ * the session-query tools can search and read it. Saying so in the checkpoint
+ * is what lets the next model stop guessing at a detail the summary dropped —
+ * and what makes it safe to summarise aggressively in the first place.
+ */
+export function recallPointer(sessionId) {
+  return [
+    '---',
+    `Nothing above is the whole record: the full pre-checkpoint history of this session is still stored event by event under session id \`${sessionId}\`.`,
+    'When a detail you need is missing or ambiguous, do not guess and do not ask the user to repeat it:',
+    `- \`session_event_search\` with that session id finds the earlier events matching a query;`,
+    '- `session_event_read` returns one of them verbatim, with its neighbours.',
+    'Prefer one recall call over one wrong assumption.',
   ].join('\n')
 }
 
@@ -115,12 +134,31 @@ export function resolveTarget(config, agent) {
   return target
 }
 
+/**
+ * Our defaults, under whatever the composition sets.
+ *
+ * Compaction rewrites the head of the conversation, so it invalidates the
+ * provider's prefix cache for everything that follows. On DeepSeek a cache hit
+ * costs a thirtieth of a miss, which makes ONE deep compaction far cheaper than
+ * two shallow ones: compact later (0.85 of the window rather than 0.80), keep a
+ * longer verbatim tail (0.20), and give the checkpoint room to be complete —
+ * twelve sections do not fit in 8k.
+ */
+export const PRO_DEFAULTS = {
+  thresholdRatio: 0.85,
+  retainRatio: 0.2,
+  maxTokens: 16_384,
+}
+
 export default class ProCompactionEngine extends BasicCompactionEngine {
   static inject = ['llm', 'tokenMeter', 'sessions']
   static Config = BasicCompactionEngine.Config
 
   constructor(ctx, config = {}) {
-    super(ctx, config)
+    // The base schema leaves these keys absent when a row does not set them,
+    // so a spread underneath is a real default rather than an override of the
+    // operator's choice.
+    super(ctx, { ...PRO_DEFAULTS, ...config })
   }
 
   /** One `ctx.llm.stream()` call: replayed prefix + final instruction message. */
@@ -182,14 +220,31 @@ export default class ProCompactionEngine extends BasicCompactionEngine {
     }
   }
 
+  /**
+   * Whether this deployment can page its own history back in. The pointer we
+   * append to a checkpoint is a PROMISE to the next model: if the tools are not
+   * mounted, the promise is a lie that costs a wasted tool call, so it is made
+   * only when the registry really holds them.
+   */
+  _canRecall() {
+    const tools = this.ctx.get?.('tools')
+    if (tools?.get === undefined) return false
+    try {
+      return tools.get('session_event_search') !== undefined && tools.get('session_event_read') !== undefined
+    } catch {
+      return false
+    }
+  }
+
   async summarize(input, agent, signal) {
     const target = resolveTarget(this.config, agent)
     const messages = input.messages
     const systemHead = messages.length > 0 && messages[0].role === 'system' ? [messages[0]] : []
     const span = messages.slice(systemHead.length)
     const r = await this._summarizeSpan(target, systemHead, span, input.tools, agent, signal, 0)
+    const pointer = this._canRecall() ? recallPointer(agent.session.id) : undefined
     return {
-      summary: r.summary,
+      summary: pointer === undefined ? r.summary : [...r.summary, { type: 'text', text: pointer }],
       rawOutput: r.rawOutput,
       ...(r.merged ? {} : { llmStreamCall: true }),
       provider: target.provider,

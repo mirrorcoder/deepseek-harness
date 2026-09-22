@@ -18,7 +18,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the version that exists; everything else resolves normally. Remove it once
 # upstream publishes a consistent tree.
 WORKDIR /opt/dsh-runtime
-RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s"},"overrides":{"@deepseek-ai/dsh-client-ui-sidebar-documentpreview":"0.1.5-rc.2"}}' "${DSH_VERSION}" > package.json \
+# `dsh-tool-session-query` is published separately and is NOT in the app's
+# dependency closure, so it has to be asked for by name. It carries the five
+# model-facing tools over the session index — the recall path our compaction
+# checkpoints point at.
+RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"0.0.1-rc.1"},"overrides":{"@deepseek-ai/dsh-client-ui-sidebar-documentpreview":"0.1.5-rc.2"}}' "${DSH_VERSION}" > package.json \
  && npm install --no-audit --no-fund
 # MCP servers switched on by deploy/features.patch.yml (stdio, launched by dsh).
 RUN npm install -g --no-audit --no-fund \
@@ -62,6 +66,7 @@ COPY deploy/web-docker.patch.yml /opt/dsh/web-docker.patch.yml
 COPY deploy/features.patch.yml /opt/dsh/features.patch.yml
 COPY deploy/entrypoint.sh /opt/dsh/entrypoint.sh
 COPY deploy/install-extensions.sh /opt/dsh/install-extensions.sh
+COPY deploy/preset-pro.mjs /opt/dsh/preset-pro.mjs
 # Our out-of-tree plugin bundles; installed into the profile by install-extensions.sh.
 COPY extensions/ /opt/dsh/extensions/
 RUN chmod +x /opt/dsh/entrypoint.sh /opt/dsh/install-extensions.sh \

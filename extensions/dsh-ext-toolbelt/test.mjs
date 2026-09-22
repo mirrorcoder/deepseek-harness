@@ -10,7 +10,6 @@ const MEASURED = {
   workflow: 997,
   'mcp__context7__resolve-library-id': 727,
   'mcp__context7__query-docs': 426,
-  schedule_create: 310,
   update_goal: 285,
   ralph: 207,
   job_output: 208,
@@ -23,12 +22,13 @@ const MEASURED = {
   job_kill: 114,
   mcp__memory__delete_entities: 92,
   mcp__memory__search_nodes: 87,
-  schedule_delete: 86,
   mcp__memory__open_nodes: 83,
   get_goal: 80,
-  schedule_list: 63,
   mcp__memory__read_graph: 45,
   job_list: 42,
+  session_search: 260,
+  session_trace: 120,
+  session_event_trace: 150,
 }
 
 test('the hidden groups are the ones that actually cost something', () => {
@@ -43,14 +43,17 @@ test('the hidden groups are the ones that actually cost something', () => {
 
 test('the everyday surface is never hidden', () => {
   const hiddenNames = new Set(toolsOf(DEFAULT_GROUPS, Object.keys(DEFAULT_GROUPS)))
-  for (const tool of ['read', 'write', 'edit', 'grep', 'glob', 'bash', 'todo_write', 'subagent', 'web_search', 'generate_image', 'skill']) {
+  for (const tool of ['read', 'write', 'edit', 'grep', 'glob', 'bash', 'todo_write', 'subagent', 'web_search', 'generate_image', 'skill',
+    // the recall pair every compaction checkpoint promises is available
+    'session_event_search', 'session_event_read']) {
     assert.equal(hiddenNames.has(tool), false, `${tool} must stay loaded`)
   }
 })
 
 test('group membership is a two-way lookup', () => {
   assert.deepEqual(toolsOf(DEFAULT_GROUPS, ['docs']), ['mcp__context7__resolve-library-id', 'mcp__context7__query-docs'])
-  assert.equal(groupOf(DEFAULT_GROUPS, 'schedule_list'), 'schedule')
+  assert.equal(groupOf(DEFAULT_GROUPS, 'session_search'), 'history')
+  assert.equal(groupOf(DEFAULT_GROUPS, 'schedule_list'), undefined, 'скоуп-инструменты реестр прятать не даёт — обещать это нельзя')
   assert.equal(groupOf(DEFAULT_GROUPS, 'read'), undefined)
   assert.deepEqual(toolsOf(DEFAULT_GROUPS, ['нетакой']), [])
 })
