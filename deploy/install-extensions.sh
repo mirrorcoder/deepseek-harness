@@ -39,13 +39,20 @@ console.log("   bundles:", m.dsh.profile.bundles.join(", "));
 RECALL_SRC="/opt/dsh-runtime/node_modules/@deepseek-ai/dsh-tool-session-query"
 RECALL_PKG="@deepseek-ai/dsh-tool-session-query"
 DSH_PRESET_RECALL=0
-if [ -d "$PROFILE/node_modules/$RECALL_PKG" ]; then
+pkg_version() { node -p "require('$1/package.json').version" 2>/dev/null || echo none; }
+have="$(pkg_version "$PROFILE/node_modules/$RECALL_PKG")"
+want="$(pkg_version "$RECALL_SRC")"
+if [ "$have" != none ] && [ "$have" = "$want" ]; then
   DSH_PRESET_RECALL=1
-elif [ -d "$RECALL_SRC" ] && dsh plugin --profile web add "file:$RECALL_SRC" >/dev/null 2>&1; then
-  DSH_PRESET_RECALL=1
+elif [ -d "$RECALL_SRC" ]; then
+  # A version drift is not cosmetic: the profile copy is what the preset row
+  # actually loads, so a tool package left a release behind the host is a seam
+  # whose shape quietly stops matching. Replace rather than keep.
+  [ "$have" = none ] || dsh plugin --profile web remove "$RECALL_PKG" >/dev/null 2>&1 || true
+  if dsh plugin --profile web add "file:$RECALL_SRC" >/dev/null 2>&1; then DSH_PRESET_RECALL=1; fi
 fi
 export DSH_PRESET_RECALL
-[ "$DSH_PRESET_RECALL" = "1" ] && echo "   ✓ recall tools (session_event_search / session_event_read)" \
+[ "$DSH_PRESET_RECALL" = "1" ] && echo "   ✓ recall tools ${want} (session_event_search / session_event_read)" \
   || echo "   !! recall tools unavailable — the preset will be built without them" >&2
 
 echo "→ materialising agent preset: pro"

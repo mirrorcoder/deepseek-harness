@@ -1,8 +1,8 @@
 {
-  "forkVersion": "1.18.0",
-  "upstreamBase": "dsh-v0.1.5-rc.2",
-  "upstreamNpm": "0.1.5-rc.2",
-  "releasedAt": "2026-09-22",
+  "forkVersion": "1.19.1",
+  "upstreamBase": "dsh-v0.1.5-rc.3",
+  "upstreamNpm": "0.1.5-rc.3",
+  "releasedAt": "2026-09-23",
   "repository": "https://github.com/mirrorcoder/deepseek-harness",
   "mirror": "https://ds.jusl.me/git/deepseek-harness.git",
   "extensions": {

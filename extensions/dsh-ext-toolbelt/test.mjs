@@ -2,7 +2,7 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-toolbelt/test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_GROUPS, describeGroups, groupOf, toolsOf, unlockedText } from './groups.js'
+import { DEFAULT_GROUPS, delegateText, describeGroups, groupOf, toolsOf, unlockedText } from './groups.js'
 
 /** Schema sizes measured on a live request header, in tokens. */
 const MEASURED = {
@@ -73,4 +73,20 @@ test('the answer after unlocking names what became available', () => {
   assert.match(unlockedText(DEFAULT_GROUPS, 'docs', ['mcp__context7__query-docs']), /документация библиотек/)
   assert.match(unlockedText(DEFAULT_GROUPS, 'docs', []), /уже была доступна/)
   assert.match(unlockedText(DEFAULT_GROUPS, 'нетакой', []), /Нет такой группы/)
+})
+
+test('the delegates are described by what they are for, not by "subagent"', () => {
+  // Upstream hands every tool-subagent instance the same generic description,
+  // so without this line a deployment advertises three identical tools.
+  const text = delegateText(['explore', 'review'])
+  assert.match(text, /`explore` — searching and reading/)
+  assert.match(text, /`review` — checking a change/)
+  assert.match(text, /INSTEAD of a run of grep\/read calls/)
+  assert.ok(text.length / 4 < 200, `эта подсказка едет в каждом запросе, got ~${Math.round(text.length / 4)} токенов`)
+})
+
+test('a delegate that is not mounted is not advertised', () => {
+  assert.doesNotMatch(delegateText(['explore']), /review/)
+  assert.equal(delegateText([]), '', 'нет делегатов — нет секции')
+  assert.equal(delegateText(['нетакого']), '')
 })

@@ -14,7 +14,7 @@
 // request until something actually needs the heavy surface.
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { DEFAULT_GROUPS, describeGroups, toolsOf, unlockedText } from './groups.js'
+import { DEFAULT_GROUPS, DELEGATES, delegateText, describeGroups, toolsOf, unlockedText } from './groups.js'
 
 export const name = 'ext-toolbelt'
 export const inject = ['tools']
@@ -110,6 +110,28 @@ export function apply(ctx, config) {
       dispose()
       retry()
     })
+  })
+
+  // What each delegate is for. Registered only for the ones the registry really
+  // holds, and computed from registry membership — which does not change inside
+  // a session, so the text stays stable and the prefix cache survives.
+  ctx.inject(['systemPrompt'], (sctx) => {
+    sctx.effect(() => sctx.systemPrompt.section({
+      name: 'toolbelt:delegates',
+      order: sctx.systemPrompt.getSectionOrder('TOOL_SUBAGENT') - 1,
+      text: (context) => {
+        const registry = sctx.get?.('tools')
+        if (registry?.get === undefined) return ''
+        const present = Object.keys(DELEGATES).filter((name) => {
+          try {
+            return registry.get(name, context?.scope) !== undefined
+          } catch {
+            return false
+          }
+        })
+        return delegateText(present)
+      },
+    }), 'ext-toolbelt: delegate guidance')
   })
 
   ctx.effect(() => ctx.tools.register(defineTool({

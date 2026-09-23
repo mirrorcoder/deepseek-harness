@@ -2,27 +2,28 @@
 # Fast to build (no TypeScript compile); DSH_VERSION must match the tag the
 # fork's `main` is based on so "what runs" == "what you read in the repo".
 # For a from-source build of local modifications see Dockerfile.source.
-ARG DSH_VERSION=0.1.5-rc.2
+ARG DSH_VERSION=0.1.5-rc.3
 
 FROM node:22-bookworm-slim AS build
 ARG DSH_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-# Installed through a manifest rather than `npm install -g` for one reason: the
-# published tree is currently unresolvable. `@deepseek-ai/dsh-web-app@0.1.5-rc.3`
-# requires `dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3`, which was never
-# published — the registry jumps from rc.2 to 0.1.6-alpha.1 — so a plain install
-# of rc.2 fails with ETARGET as soon as npm resolves that sub-dependency to
-# rc.3. rc.3 itself fails the same way. The override pins that one package to
-# the version that exists; everything else resolves normally. Remove it once
-# upstream publishes a consistent tree.
+# Installed through a manifest rather than `npm install -g` so the separately
+# published recall tools ride the SAME version line as the app: they are not in
+# its dependency closure, and a tool package a minor behind the host is how a
+# seam quietly changes shape underneath it.
+#
+# (History: rc.2 needed an `overrides` block because
+# `dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3` had never been published
+# and the registry jumped straight to 0.1.6-alpha.1. Upstream has since
+# published it, so rc.3 resolves on its own and the override is gone.)
 WORKDIR /opt/dsh-runtime
 # `dsh-tool-session-query` is published separately and is NOT in the app's
-# dependency closure, so it has to be asked for by name. It carries the five
-# model-facing tools over the session index — the recall path our compaction
-# checkpoints point at.
-RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"0.0.1-rc.1"},"overrides":{"@deepseek-ai/dsh-client-ui-sidebar-documentpreview":"0.1.5-rc.2"}}' "${DSH_VERSION}" > package.json \
+# dependency closure, so it has to be asked for by name, at the app's version.
+# It carries the five model-facing tools over the session index — the recall
+# path our compaction checkpoints point at.
+RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"%s"}}' "${DSH_VERSION}" "${DSH_VERSION}" > package.json \
  && npm install --no-audit --no-fund
 # MCP servers switched on by deploy/features.patch.yml (stdio, launched by dsh).
 RUN npm install -g --no-audit --no-fund \

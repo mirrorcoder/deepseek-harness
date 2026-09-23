@@ -110,3 +110,28 @@ export function unlockedText(groups, name, applied) {
     'Инструменты появятся в следующем шаге — вызывай их обычным образом.',
   ].join(' ')
 }
+
+/**
+ * The specialised delegates, and what each is actually for.
+ *
+ * Upstream gives every `tool-subagent` instance the SAME generic description
+ * ("delegate a self-contained task…"), so a deployment that mounts three of
+ * them advertises three identical tools. The model cannot tell which one
+ * searches — and measured on a live task it simply did not use them: twelve
+ * inline grep/read/bash calls, all of it landing in the parent's context.
+ * These lines are the missing half of the contract.
+ */
+export const DELEGATES = {
+  explore: 'searching and reading: where something lives, how it works, which files are involved. It answers with a conclusion plus file:line evidence and cannot edit or run commands. Reach for it INSTEAD of a run of grep/read calls whenever the answer needs more than two or three files — what it reads never enters this conversation.',
+  review: 'checking a change or a file for correctness before you hand it over. It may run tests. It answers with findings, each naming file:line and the concrete failure, or with "nothing wrong found".',
+}
+
+/** The prompt line for the delegates this deployment really has. */
+export function delegateText(present) {
+  const rows = Object.entries(DELEGATES).filter(([name]) => present.includes(name))
+  if (rows.length === 0) return ''
+  return [
+    'Specialised delegates (each runs in its own context and returns only its result; give it a complete, standalone task — it does not see this conversation):',
+    ...rows.map(([name, why]) => `- \`${name}\` — ${why}`),
+  ].join('\n')
+}

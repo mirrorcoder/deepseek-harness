@@ -12,6 +12,43 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.19.1 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+- **Fixed: the specialised delegates were invisible in practice.** Upstream
+  gives every `tool-subagent` instance the same generic description ("delegate
+  a self-contained task…"), so mounting `explore` and `review` beside the
+  generic `subagent` advertised three identical tools and the model had no way
+  to tell which one searches. Measured on a real task — "find where the
+  postbacks are handled" — it used none of them: twelve inline grep/read/bash
+  calls, every byte landing in the parent's context, which is exactly what the
+  delegates exist to prevent. A short prompt section now says what each one is
+  for, registered only for the delegates the registry really holds and computed
+  from membership that does not change inside a session, so the prefix cache
+  survives. Cost: about 90 tokens per request.
+- Same run confirmed memory works unprompted: asked to keep what matters for
+  future sessions, the agent called `remember` on its own and wrote a note that
+  a fresh session now starts with.
+
+## v1.19.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+- **Base moved to `0.1.5-rc.3` and the override is gone.** rc.2 only installed
+  because of an `overrides` pin: `dsh-client-ui-sidebar-documentpreview@^0.1.5-rc.3`
+  had never been published and the registry jumped straight to `0.1.6-alpha.1`,
+  so npm failed with ETARGET while resolving it. Upstream has since published
+  that version, rc.3 resolves on its own, and the pin is removed. The upstream
+  step itself is three commits of version bumps, which is exactly the size of
+  step worth taking promptly.
+- **The recall tools now ride the app's version line.** They are published
+  outside the app's dependency closure, so the manifest asks for them by name at
+  `${DSH_VERSION}` rather than at a pinned `0.0.1-rc.1`, and the installer
+  compares the profile's copy against the image's and replaces it when they
+  differ. The profile copy is what a preset row actually loads: a tool package
+  left a release behind the host is a seam whose shape quietly stops matching.
+
 ## v1.18.0 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.2`.
