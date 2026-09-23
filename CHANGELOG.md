@@ -12,6 +12,42 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.20.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+- **The model-free pass now knows what is recoverable** (`dsh-ext-prune-pro`).
+  Upstream prunes at the last moment — once pressure qualifies, it prunes,
+  remeasures, and skips the expensive LLM compaction entirely if that alone got
+  under the threshold — so how hard this pass bites decides whether a
+  conversation gets summarised at all. It bit the same way for every result:
+  keep 2048 characters of head, 512 of tail. That is right for a command's
+  output, which exists nowhere else, and wasteful for a file read, which is a
+  copy of something still on disk. Regenerable results (`read`, `read_image`,
+  `glob`, `find_projects`) now collapse to a pointer naming the source, how to
+  get the current content, and how to recover exactly that version from the log
+  with `session_event_read`. Everything else keeps upstream's treatment,
+  because our pruner subclasses upstream's and calls it.
+  Three defects in that pruner were found by the harness itself, reviewing this
+  diff: `glob` names both a pattern and a path and the pointer took the path,
+  sending a re-read back with the pattern lost; `read_image` was listed as
+  regenerable although its result carries an image block the replacement would
+  have silently dropped; and the extension was not yet committed while the
+  preset already referenced it, which fails a deploy from a fresh clone AFTER
+  the container has been recreated. All three are fixed here.
+- **The original task is pinned into every checkpoint.** It is read from the
+  LOG rather than the surface, so by the second compaction — when the first
+  request has long been replaced by a checkpoint — it is still the user's own
+  wording rather than a summary of a summary. A resumed agent that loses this
+  drifts politely away from what was actually asked.
+- **A child can be sent to a named model.** `subagent-model-selection` is on
+  with the four DeepSeek routes allow-listed, so `subagent` takes
+  `provider`/`model`/`reasoning_effort` and `list_subagent_models` advertises
+  what may be chosen. "Use an agent on model X for this" is now a thing the
+  model can act on. A provider added as a route in Settings → `llm-pi-ai`
+  (OpenAI-compatible gateways, self-hosted servers, pi-ai catalogs) must also
+  be added to that allowlist before a child may select it.
+
 ## v1.19.1 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.

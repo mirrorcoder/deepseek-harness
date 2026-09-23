@@ -58,6 +58,36 @@ export function buildInstruction(ledger, opts = {}) {
   ].join('\n')
 }
 
+/**
+ * The message this session was opened with, read from the LOG rather than the
+ * surface: by the second compaction the original is shadowed by a checkpoint,
+ * and a summary of a summary is exactly where the original wording goes. This
+ * is the one line that must survive every round.
+ */
+export function firstTaskOf(session, maxChars = 1200) {
+  const total = session?.seq ?? 0
+  if (typeof session?.eventAt !== 'function') return undefined
+  for (let seq = 0; seq < total; seq += 1) {
+    let event
+    try {
+      event = session.eventAt(seq)
+    } catch {
+      continue
+    }
+    if (event?.type !== 'user/message') continue
+    const kind = event.data?.source?.kind
+    if (kind !== undefined && kind !== 'user') continue
+    const text = (event.data?.content ?? [])
+      .filter((block) => block?.type === 'text')
+      .map((block) => block.text)
+      .join('\n')
+      .trim()
+    if (text.length === 0 || text.includes('<compacted-summary>')) continue
+    return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text
+  }
+  return undefined
+}
+
 export function buildMergeInstruction(parts) {
   return [
     `Below are ${parts.length} partial checkpoints, each condensing a consecutive part of one long conversation (oldest first). Merge them into ONE consolidated checkpoint with exactly the same section structure as the parts.`,
@@ -189,6 +219,8 @@ export default class ProCompactionEngine extends BasicCompactionEngine {
   /** Summarise one span; retries once on MAX_TOKENS; map-reduces on overflow. */
   async _summarizeSpan(target, systemHead, span, tools, agent, signal, depth) {
     const ledger = buildLedger(span)
+    const firstTask = firstTaskOf(agent?.session)
+    if (firstTask !== undefined) ledger.firstTask = firstTask
     const maxTokens = this.config.maxTokens
     try {
       return await this._callSummarizer(target, [...systemHead, ...span], tools, buildInstruction(ledger), maxTokens, agent, signal)

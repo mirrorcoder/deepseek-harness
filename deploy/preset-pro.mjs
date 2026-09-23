@@ -115,8 +115,13 @@ export function patchPreset(text, options = {}) {
   }
   out = out.replace(engine, 'name: dsh-ext-compaction-pro')
 
-  const prunerAt = out.indexOf("name: '@deepseek-ai/dsh-compaction-tool-result-pruner'")
+  const prunerName = "name: '@deepseek-ai/dsh-compaction-tool-result-pruner'"
+  const prunerAt = out.indexOf(prunerName)
   if (prunerAt === -1) throw new Error('tool-result pruner row not found — upstream changed, refusing to guess')
+  // Ours subclasses upstream's and runs it: regenerable results (a file read is
+  // a copy of something still on disk) collapse to a pointer, everything else
+  // keeps the head/tail treatment.
+  out = `${out.slice(0, prunerAt)}name: dsh-ext-prune-pro${out.slice(prunerAt + prunerName.length)}`
   const tail = out.slice(prunerAt)
   let patchedTail = tail
   for (const [key, value] of Object.entries(PRUNE)) {

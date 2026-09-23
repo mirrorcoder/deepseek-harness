@@ -54,3 +54,22 @@
 # DSH_TELEMETRY_MODE=DISABLED; this makes the row itself absent).
 - id: session-telemetry-otel
   disabled: true
+
+# ── delegate on a named model ───────────────────────────────────────────────
+# With this on, `subagent` takes `provider`/`model`/`reasoning_effort` and
+# `list_subagent_models` appears, so "use a model X agent for this" is a thing
+# the model can actually do. The allowlist is the whole authorisation: a route
+# that is not here cannot be selected, and a NEW provider (added as a route in
+# Settings → llm-pi-ai) has to be added here too before a child may use it.
+- id: subagent-model-selection-settings
+  config:
+    enabled: true
+    allowedModels:
+      - provider: deepseek-official
+        model: deepseek-flash
+      - provider: deepseek-official
+        model: deepseek-v4-flash
+      - provider: deepseek-official
+        model: deepseek-v4-pro
+      - provider: deepseek-official
+        model: deepseek-v4-flash-vision-exp

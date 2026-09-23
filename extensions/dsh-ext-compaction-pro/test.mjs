@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildLedger, renderLedger, splitAtHumanBoundary, isHumanMessage } from './ledger.js'
-import { buildInstruction, buildMergeInstruction, resolveTarget, recallPointer, CHECKPOINT_SECTIONS, PRO_DEFAULTS } from './index.js'
+import { buildInstruction, buildMergeInstruction, firstTaskOf, resolveTarget, recallPointer, CHECKPOINT_SECTIONS, PRO_DEFAULTS } from './index.js'
 
 const user = (text) => ({ role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text }] })
 const call = (name, args) => ({ role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name, arguments: JSON.stringify(args) }] })
@@ -144,4 +144,46 @@ test('the instruction makes the ledger a floor, not a hint', () => {
   const text = buildInstruction(buildLedger(span))
   assert.match(text, /user instruction, plan item and failure/)
   assert.match(text, /it is the floor/)
+})
+
+/** A session made of literals: eventAt(seq) over a flat array. */
+const fakeSession = (events) => ({ seq: events.length, eventAt: (i) => events[i] })
+const logged = (type, data) => ({ type, data })
+
+test('the original task is read from the log, so a checkpoint cannot bury it', () => {
+  const session = fakeSession([
+    logged('session/created', {}),
+    logged('user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'Почини выкатку и не трогай схему' }] }),
+    logged('assistant/message', {}),
+    logged('user/message', { source: { kind: 'plugin' }, content: [{ type: 'text', text: '<compacted-summary>…' }] }),
+    logged('user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'ещё вот это' }] }),
+  ])
+  assert.equal(firstTaskOf(session), 'Почини выкатку и не трогай схему')
+})
+
+test('a synthetic checkpoint is never mistaken for the original task', () => {
+  const session = fakeSession([
+    logged('user/message', { content: [{ type: 'text', text: 'prefix <compacted-summary> body' }] }),
+    logged('user/message', { source: { kind: 'user' }, content: [{ type: 'text', text: 'настоящая задача' }] }),
+  ])
+  assert.equal(firstTaskOf(session), 'настоящая задача')
+})
+
+test('a session with no user message yet yields nothing, not a crash', () => {
+  assert.equal(firstTaskOf(fakeSession([logged('session/created', {})])), undefined)
+  assert.equal(firstTaskOf(undefined), undefined)
+  assert.equal(firstTaskOf({ seq: 3 }), undefined, 'без eventAt читать нечего')
+})
+
+test('a very long first task is truncated, not dropped', () => {
+  const session = fakeSession([logged('user/message', { content: [{ type: 'text', text: 'x'.repeat(5000) }] })])
+  assert.equal(firstTaskOf(session, 100).length, 101)
+})
+
+test('the anchor is rendered as something the summariser must not drop', () => {
+  const ledger = { ...buildLedger([user('привет')]), firstTask: 'Почини выкатку' }
+  const text = renderLedger(ledger)
+  assert.match(text, /never drop it/)
+  assert.match(text, /"Почини выкатку"/)
+  assert.doesNotMatch(renderLedger(buildLedger([user('привет')])), /never drop it/)
 })

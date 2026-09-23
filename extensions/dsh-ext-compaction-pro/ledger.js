@@ -147,6 +147,14 @@ export function renderPlan(args) {
 
 export function renderLedger(ledger) {
   const lines = ['### Ledger (extracted deterministically from the span; carry every item into the checkpoint)']
+  if (ledger.firstTask !== undefined) {
+    // The anchor that outlives every compaction: read from the LOG, not the
+    // surface, so it is still the original wording after the first checkpoint
+    // has replaced it. A resumed agent that has lost this drifts politely away
+    // from what was actually asked.
+    lines.push('The task this whole session was opened for (verbatim, may predate this span — never drop it):')
+    lines.push(`- "${ledger.firstTask.replace(/\s+/g, ' ')}"`)
+  }
   lines.push(`User messages in span: ${ledger.humanMessages}${ledger.directives.length < ledger.humanMessages ? ` (oldest ${ledger.humanMessages - ledger.directives.length} omitted for length; they are in the session log)` : ''}`)
   lines.push('User instructions (verbatim, oldest → newest) — reproduce ALL of them in the checkpoint:')
   if (ledger.directives.length === 0) lines.push('- (none)')

@@ -1,0 +1,14 @@
+{
+  "name": "dsh-ext-prune-pro",
+  "version": "0.1.0",
+  "description": "Model-free pruning that knows what is recoverable: regenerable tool results collapse to a pointer, the rest keeps upstream's head/tail treatment",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "pointer.js", "test.mjs"],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-compaction-tool-result-pruner": "*"
+  }
+}

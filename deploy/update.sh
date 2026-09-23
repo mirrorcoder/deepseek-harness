@@ -42,6 +42,7 @@ for d in skills/*/; do
 done
 # A clean exit lets the restart policy boot the process with the new bundles;
 # bundle membership is only read at boot.
+STARTED_BEFORE="$(docker inspect -f '{{.State.StartedAt}}' dsh 2>/dev/null || echo none)"
 docker exec dsh kill -TERM 1 || true
 echo "→ waiting for dsh after restart…"
 # Health, not log text: the pre-restart token line is still inside the log
@@ -52,6 +53,15 @@ echo "→ waiting for dsh after restart…"
 # health status until the next check, so a container that is still restarting
 # can read "healthy"; and a container that is merely running may not have
 # finished booting. Wait for exec to work, then for health to be re-earned.
+# The restart itself first: right after the TERM the container is still up
+# (the process is merely exiting), so an exec probe succeeds and the stale
+# health status still reads "healthy" — both lie for a second or two. The start
+# timestamp does not.
+i=0; while [ $i -lt 60 ]; do
+  now="$(docker inspect -f '{{.State.StartedAt}}' dsh 2>/dev/null || echo none)"
+  [ "$now" != "$STARTED_BEFORE" ] && [ "$now" != none ] && break
+  i=$((i+1)); sleep 2
+done
 i=0; while [ $i -lt 60 ]; do
   docker exec dsh true >/dev/null 2>&1 && break
   i=$((i+1)); sleep 2
@@ -61,7 +71,7 @@ i=0; while [ $i -lt 90 ]; do
   i=$((i+1)); sleep 2
 done
 echo "→ extension tests"
-docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory; do printf "   %-26s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done' || echo "   !! тесты прогнать не удалось (контейнер перезапускается?)"
+docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro; do printf "   %-26s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done' || echo "   !! тесты прогнать не удалось (контейнер перезапускается?)"
 echo "→ running build: $(docker exec dsh sh -c 'cat /opt/dsh/build-info.json' | tr -d "\n ")"
 
 # Every build leaves behind the cache that produced it and the tag it replaced.
