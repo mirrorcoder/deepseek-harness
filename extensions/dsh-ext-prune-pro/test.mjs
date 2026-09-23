@@ -62,3 +62,27 @@ test('measuring counts text blocks by code point and ignores the rest', () => {
   // a surrogate pair is one character, not two
   assert.equal(textChars([{ type: 'text', text: '😀' }]), 1)
 })
+
+/** A session made of log events, with the surface naming a subset of them. */
+function fakeSession(events, surface) {
+  return {
+    seq: events.length,
+    eventAt: (i) => events[i],
+    surface: { nodes: surface ?? events.map((_, i) => i) },
+  }
+}
+
+test('the tool behind a result is found in the LOG, because calls are not on the surface', async () => {
+  const { default: ProToolResultPruner } = await import('./index.js').catch(() => ({ default: undefined }))
+  if (ProToolResultPruner === undefined) return // peer deps live in the container only
+  const events = [
+    { type: 'tool/call', data: { callId: 'c1', name: 'read', arguments: '{"file_path":"/a/b.ts"}' } },
+    { type: 'assistant/message', data: {} },
+    { type: 'tool/result', data: { message: { source: { kind: 'tool', callId: 'c1' }, content: [{ type: 'tool-result', content: [{ type: 'text', text: 'x'.repeat(5000) }] }] } } },
+  ]
+  // surface holds the message nodes only — exactly the shape that made the pass a no-op
+  const session = fakeSession(events, [1, 2])
+  const pruner = Object.create(ProToolResultPruner.prototype)
+  const calls = pruner._callsOf(session)
+  assert.equal(calls.get('c1')?.name, 'read')
+})

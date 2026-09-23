@@ -934,7 +934,16 @@ export function apply(ctx, initial) {
         const ref = target.destination.id === 'env' ? 'TELEGRAM_BOT_TOKEN' : tokenRef(target.destination.id)
         const token = await getToken(ref)
         if (token === undefined || token.length === 0) throw new Error('this bot has no token stored')
-        await callTelegram(token, 'deleteForumTopic', { chat_id: chatId, message_thread_id: threadId })
+        let alreadyGone = false
+        try {
+          await callTelegram(token, 'deleteForumTopic', { chat_id: chatId, message_thread_id: threadId })
+        } catch (error) {
+          // A topic Telegram says does not exist is not worth remembering: the
+          // operator deleted it by hand, or it never survived. Forgetting it is
+          // the whole remaining job, so this is success, not failure.
+          if (!/TOPIC_ID_INVALID|not found|message thread not found/i.test(error?.message ?? '')) throw error
+          alreadyGone = true
+        }
         // Forget it here too, or the next broadcast writes into a topic that no
         // longer exists and the outbox reports one failure per line.
         const rows = scope?.get()?.threads ?? []
@@ -942,7 +951,7 @@ export function apply(ctx, initial) {
         if (scope !== undefined) await scope.update({ threads: kept })
         for (const [key, value] of adoptedThreads) if (value === threadId) adoptedThreads.delete(key)
         threadSessions.delete(`${chatId}:${threadId}`)
-        return { closed: threadId }
+        return { closed: threadId, ...alreadyGone ? { alreadyGone: true } : {} }
       },
     })
 

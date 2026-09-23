@@ -75,6 +75,24 @@ EOF
 rm -rf "$DST" && mv "$DST.tmp" "$DST"
 echo "   ✓ $DST"
 
+# A second preset, identical to `pro` except that compaction fires almost at
+# once. It exists because the pruning and compaction path is otherwise
+# unreachable in testing: the DeepSeek adapter advertises a 1,000,000-token
+# window, so the real threshold sits around 850k tokens of live surface. The
+# first version of the pointer pass was a silent no-op for exactly as long as
+# nobody could make it run. Regenerated from `pro` every update so it cannot
+# drift away from what it is meant to verify.
+PROBE="$DSH_HOME/.agent-presets/probe"
+rm -rf "$PROBE" && cp -r "$DST" "$PROBE"
+sed -i "s|^      name: dsh-ext-compaction-pro$|      name: dsh-ext-compaction-pro\n      config:\n        thresholdRatio: 0.01\n        retainRatio: 0.004|" "$PROBE/agent.cordis.yml"
+sed -i "s|^        thresholdChars: |        pointerMinChars: 400\n        thresholdChars: |" "$PROBE/agent.cordis.yml"
+cat > "$PROBE/preset.yml" <<'EOF'
+name: Probe (compaction at once)
+description: The `pro` preset with the compaction threshold at 1% of the window and pruning that bites on small results. For verifying the compaction and pruning path, which is otherwise unreachable behind a 1M-token window. Not for real work.
+order: 90
+EOF
+echo "   ✓ $PROBE"
+
 SETTINGS="$DSH_HOME/settings.yaml"
 if [ ! -f "$SETTINGS" ] || ! grep -q '^agent-presets:' "$SETTINGS"; then
   printf '\nagent-presets:\n  default: pro\n' >> "$SETTINGS"

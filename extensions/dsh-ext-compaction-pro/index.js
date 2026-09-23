@@ -108,6 +108,9 @@ export function buildMergeInstruction(parts) {
  */
 export function recallPointer(sessionId) {
   return [
+    // A blank line first: the summariser's last section ends without one, and
+    // the pointer ran straight into it ("…celиком?---").
+    '',
     '---',
     `Nothing above is the whole record: the full pre-checkpoint history of this session is still stored event by event under session id \`${sessionId}\`.`,
     'When a detail you need is missing or ambiguous, do not guess and do not ask the user to repeat it:',
@@ -256,16 +259,18 @@ export default class ProCompactionEngine extends BasicCompactionEngine {
    * Whether this deployment can page its own history back in. The pointer we
    * append to a checkpoint is a PROMISE to the next model: if the tools are not
    * mounted, the promise is a lie that costs a wasted tool call, so it is made
-   * only when the registry really holds them.
+   * only when they really exist.
+   *
+   * Asked of the REQUEST, not of the registry. The recall tools are registered
+   * by the agent preset, so a host-plane `tools.get(name)` with no scope never
+   * sees them — the first live compaction produced a checkpoint with no pointer
+   * at all, and nothing said why. The summarization input carries the exact
+   * tool list the conversation is running with, which is the same question
+   * asked where the answer is true.
    */
-  _canRecall() {
-    const tools = this.ctx.get?.('tools')
-    if (tools?.get === undefined) return false
-    try {
-      return tools.get('session_event_search') !== undefined && tools.get('session_event_read') !== undefined
-    } catch {
-      return false
-    }
+  _canRecall(input) {
+    const names = new Set((input?.tools ?? []).map((tool) => tool?.name))
+    return names.has('session_event_search') && names.has('session_event_read')
   }
 
   async summarize(input, agent, signal) {
@@ -274,7 +279,7 @@ export default class ProCompactionEngine extends BasicCompactionEngine {
     const systemHead = messages.length > 0 && messages[0].role === 'system' ? [messages[0]] : []
     const span = messages.slice(systemHead.length)
     const r = await this._summarizeSpan(target, systemHead, span, input.tools, agent, signal, 0)
-    const pointer = this._canRecall() ? recallPointer(agent.session.id) : undefined
+    const pointer = this._canRecall(input) ? recallPointer(agent.session.id) : undefined
     return {
       summary: pointer === undefined ? r.summary : [...r.summary, { type: 'text', text: pointer }],
       rawOutput: r.rawOutput,

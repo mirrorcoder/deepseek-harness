@@ -43,15 +43,29 @@ export default class ProToolResultPruner extends ToolResultPruner {
   }
 
   /**
-   * Which tool produced which result, read from the surface itself.
+   * Which tool produced which result.
+   *
+   * Read from the LOG, not from the surface. A `tool/call` is not a surface
+   * node — the surface carries the assistant message that contains the call as
+   * a block, and the standalone call event is log-only. Walking the surface
+   * therefore built an empty map, every result looked like it came from an
+   * unknown tool, and the whole pointer pass silently did nothing. It cost a
+   * deliberate run at a lowered threshold to see that, because nothing throws:
+   * a no-op pass looks exactly like a pass with nothing to do.
    * @returns Map<callId, {name, arguments}>
    */
   _callsOf(session) {
     const calls = new Map()
-    for (const seq of session.surface.nodes) {
-      const event = session.eventAt(seq)
+    const total = session?.seq ?? 0
+    for (let seq = 0; seq < total; seq += 1) {
+      let event
+      try {
+        event = session.eventAt(seq)
+      } catch {
+        continue
+      }
       if (event?.type !== 'tool/call') continue
-      const id = event.data.callId ?? event.data.id ?? event.data.message?.source?.callId
+      const id = event.data.callId ?? event.data.id
       if (id !== undefined) calls.set(id, { name: event.data.name, arguments: event.data.arguments })
     }
     return calls

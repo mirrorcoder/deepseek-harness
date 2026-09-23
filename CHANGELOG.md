@@ -12,6 +12,42 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.20.1 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+- **Fixed: the pointer pass was a silent no-op.** It looked up which tool
+  produced each result by walking the session SURFACE for `tool/call` events —
+  and a call is not a surface node: the surface carries the assistant message
+  that contains the call as a block, while the standalone call event is
+  log-only. The map came out empty, every result looked like it came from an
+  unknown tool, and the pass did nothing at all. Nothing threw, nothing logged:
+  a no-op pass is indistinguishable from a pass with nothing to do. It took a
+  deliberate run at a lowered threshold to see it. Calls are now read from the
+  log.
+- **Fixed: the checkpoint carried no recall pointer.** Whether the recall tools
+  exist was asked of the host tool registry with no scope, and those tools are
+  registered by the AGENT preset — so the answer was always no, and the first
+  real checkpoint shipped without the one line that makes compaction
+  recoverable. The question is now asked of the summarization request's own
+  tool list, which is the same question asked where the answer is true.
+- Verified on that run: pruning fires, the compaction transaction opens and
+  closes, two of the four attempts correctly refused their own summary for not
+  being smaller than what it replaced, and the session kept answering
+  throughout.
+- A `probe` preset is regenerated beside `pro` on every update: the same
+  composition with compaction at 1% of the window. The pruning path is
+  otherwise unreachable in testing, and the first pointer pass stayed a silent
+  no-op for exactly as long as nobody could make it run.
+- `deploy/telegram.sh topic-close` now forgets a topic Telegram no longer has
+  instead of failing: a thread the operator deleted by hand would otherwise sit
+  in the remembered list forever.
+- **Worth knowing: the DeepSeek adapter advertises a 1,000,000-token window**,
+  so the 0.85 threshold means compaction only begins around 850k tokens of
+  live surface. On this deployment that is a rare event, not a routine one —
+  the practical limits are cost per request and the provider's own per-request
+  cap, not the compaction threshold.
+
 ## v1.20.0 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.

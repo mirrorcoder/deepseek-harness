@@ -187,3 +187,15 @@ test('the anchor is rendered as something the summariser must not drop', () => {
   assert.match(text, /"Почини выкатку"/)
   assert.doesNotMatch(renderLedger(buildLedger([user('привет')])), /never drop it/)
 })
+
+test('the recall promise is made from the request\'s own tool list', async () => {
+  const mod = await import('./index.js').catch(() => undefined)
+  if (mod === undefined) return // peer deps live in the container only
+  const engine = Object.create(mod.default.prototype)
+  const withRecall = { tools: [{ name: 'read' }, { name: 'session_event_search' }, { name: 'session_event_read' }] }
+  assert.equal(engine._canRecall(withRecall), true)
+  // half the pair is not a recall path: promising it costs a wasted call
+  assert.equal(engine._canRecall({ tools: [{ name: 'session_event_search' }] }), false)
+  assert.equal(engine._canRecall({ tools: [] }), false)
+  assert.equal(engine._canRecall(undefined), false)
+})

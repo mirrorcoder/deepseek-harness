@@ -1,6 +1,6 @@
 {
   "name": "dsh-ext-telegram",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Telegram bridge: live session broadcast into topics, the access mode and every question the harness asks as buttons, bots managed from the page",
   "type": "module",
   "main": "index.js",
