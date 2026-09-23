@@ -8,12 +8,12 @@
 // what it should — without asking the operator to go and look. Headless
 // Chromium runs inside this container (see shot.js); nothing leaves the box
 // except the request to the page itself.
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import z from '@deepseek-ai/schemastery'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { checkUrl, domArgs, htmlToText, runChromium, screenshotArgs, slugOf } from './shot.js'
+import { capture, checkUrl, slugOf, tidyText } from './shot.js'
 
 export const name = 'ext-web-shot'
 export const inject = ['tools']
@@ -41,7 +41,7 @@ export function apply(ctx, config) {
     try {
       return await work(profileDir)
     } finally {
-      await rm(profileDir, { recursive: true, force: true }).catch(() => {})
+      await rm(profileDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }).catch(() => {})
     }
   }
 
@@ -66,7 +66,7 @@ export function apply(ctx, config) {
         properties: { file: { type: 'string' }, url: { type: 'string' }, image: { type: 'object', additionalProperties: true } },
       },
       render: (_args, value) => [
-        { type: 'text', text: `Скриншот ${value.url} → ${value.file}` },
+        { type: 'text', text: `Скриншот ${value.url}${value.status ? ` (HTTP ${value.status})` : ''}${value.title ? ` «${value.title}»` : ''} → ${value.file}` },
         ...(value.image?.ref ? [{ type: 'image', attachment: value.image.ref }] : []),
       ],
     },
@@ -81,12 +81,17 @@ export function apply(ctx, config) {
       await mkdir(outDir, { recursive: true })
       const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')
       const file = join(outDir, `${stamp}-${slugOf(url)}.png`)
-      await withProfile((profileDir) => runChromium(
-        config.chromium,
-        screenshotArgs(url, { out: file, profileDir, width: args.width, height: args.height, waitMs: args.wait_ms }),
-        config.timeoutSeconds * 1000,
-      ))
-      const data = await readFile(file)
+      const shot = await withProfile((profileDir) => capture(url, {
+        binary: config.chromium,
+        profileDir,
+        mode: 'screenshot',
+        width: args.width,
+        height: args.height,
+        waitMs: args.wait_ms,
+        timeoutMs: config.timeoutSeconds * 1000,
+      }))
+      const data = shot.png
+      await writeFile(file, data)
       let ref
       const attachments = ctx.get('attachments')
       if (attachments !== undefined) {
@@ -96,7 +101,7 @@ export function apply(ctx, config) {
           ref = undefined
         }
       }
-      return { file, url, image: { bytes: data.length, ...(ref ? { ref } : {}) } }
+      return { file, url, status: shot.status, title: shot.title, image: { bytes: data.length, ...(ref ? { ref } : {}) } }
     },
   })), 'ext-web-shot: screenshot')
 
@@ -113,18 +118,20 @@ export function apply(ctx, config) {
     timeoutMs: (config.timeoutSeconds + 15) * 1000,
     output: {
       schema: { type: 'object', additionalProperties: true, properties: { title: { type: 'string' }, text: { type: 'string' } } },
-      render: (_args, value) => [{ type: 'text', text: `${value.title ? `# ${value.title}\n\n` : ''}${value.text || '(на странице нет видимого текста)'}` }],
+      render: (_args, value) => [{ type: 'text', text: `${value.status ? `HTTP ${value.status}\n` : ''}${value.title ? `# ${value.title}\n\n` : ''}${value.text || '(на странице нет видимого текста)'}` }],
     },
     presentCall: (args) => ({ card: 'generic', title: `Текст страницы: ${args.url}`, kind: 'other', rawInput: args }),
     isConcurrencySafe: () => true,
     async execute(args) {
       const url = checkUrl(args.url)
-      const html = await withProfile((profileDir) => runChromium(
-        config.chromium,
-        domArgs(url, { profileDir, waitMs: args.wait_ms }),
-        config.timeoutSeconds * 1000,
-      ))
-      return { url, ...htmlToText(html, config.maxTextChars) }
+      const page = await withProfile((profileDir) => capture(url, {
+        binary: config.chromium,
+        profileDir,
+        mode: 'text',
+        waitMs: args.wait_ms,
+        timeoutMs: config.timeoutSeconds * 1000,
+      }))
+      return { url, status: page.status, title: page.title, text: tidyText(page.text, config.maxTextChars) }
     },
   })), 'ext-web-shot: page_text')
 }

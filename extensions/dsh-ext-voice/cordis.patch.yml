@@ -1,0 +1,6 @@
+# Host-plane row: one speech service for the whole box — the web composer's
+# microphone and the Telegram bridge's voice notes both go through it, so they
+# share one model and one queue.
+- insert:
+    - id: ext-voice
+      name: dsh-ext-voice

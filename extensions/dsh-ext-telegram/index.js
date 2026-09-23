@@ -32,8 +32,6 @@ import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
 import { Bindings, handleCallback, handleMessage } from './control.js'
 import { AskDesk } from './ask.js'
-import { transcribe } from './voice.js'
-import { join as joinPath } from 'node:path'
 import { topicSpec, topicName, workspaceOf } from './topics.js'
 import { RunView } from './run-view.js'
 
@@ -79,11 +77,8 @@ export const Config = z.object({
   editIntervalMs: z.number().default(1800),
   /** Transcribe voice notes with the local whisper and treat them as typed text. */
   voice: z.boolean().default(true),
-  /** whisper.cpp model name; fetched once into $DSH_HOME/models on first use. */
-  voiceModel: z.string().default('small-q5_1'),
-  /** Spoken language, or `auto`. Pinning it is faster and more accurate. */
+  /** Spoken language, or `auto`; the model itself is configured on dsh-ext-voice. */
   voiceLanguage: z.string().default('ru'),
-  voiceThreads: z.number().default(3),
   /** Longest voice note accepted, in seconds; a CPU transcription is not free. */
   voiceMaxSeconds: z.number().default(300),
 })
@@ -318,12 +313,12 @@ export function apply(ctx, initial) {
 
   // ── voice: a spoken task is a task ────────────────────────────────────────
   //
-  // Transcribed on this machine by whisper.cpp; one at a time, because a CPU
-  // transcription competes with everything else the box runs. What was heard is
-  // echoed back first, so a misheard word is caught before the agent acts on it.
-  let voiceQueue = Promise.resolve()
+  // Transcribed on this machine by the `voice` service (dsh-ext-voice), the
+  // same one the web composer's microphone uses — one model, one queue for the
+  // whole box. What was heard is echoed back first, so a misheard word is
+  // caught before the agent acts on it.
   const hearVoice = (ref, chat) => {
-    const job = voiceQueue.then(async () => {
+    const job = (async () => {
       const say = async (text) => {
         const token = await getToken(ref)
         if (token === undefined || token.length === 0) return
@@ -343,15 +338,15 @@ export function apply(ctx, initial) {
       }
       const token = await getToken(ref)
       if (token === undefined || token.length === 0) return undefined
+      const voice = ctx.get('voice')
+      if (voice === undefined) {
+        await say('Распознавание речи не установлено в этой сборке (dsh-ext-voice). Напиши текстом.')
+        return undefined
+      }
       await say('🎙 Слушаю…')
       try {
         const audio = await downloadFile(token, chat.voice)
-        const text = await transcribe(audio.data, {
-          modelDir: joinPath(process.env.DSH_HOME ?? '/data/dsh', 'models'),
-          model: config.voiceModel,
-          language: config.voiceLanguage,
-          threads: config.voiceThreads,
-        })
+        const text = await voice.transcribe(audio.data, { language: config.voiceLanguage })
         if (text.length === 0) {
           await say('Не расслышал ни слова. Попробуй ещё раз или напиши текстом.')
           return undefined
@@ -363,8 +358,7 @@ export function apply(ctx, initial) {
         await say(`Не смог расшифровать: ${error instanceof Error ? error.message : String(error)}`)
         return undefined
       }
-    })
-    voiceQueue = job.catch(() => {})
+    })()
     return job
   }
 

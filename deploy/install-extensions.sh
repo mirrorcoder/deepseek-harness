@@ -52,7 +52,7 @@ done
 [ "$LSP_OK" = 1 ] && echo "   ✓ lsp packages" || echo "   !! lsp packages unavailable — dsh-ext-lsp will not be mounted" >&2
 
 echo "→ installing extensions into $PROFILE"
-EXTS="dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro dsh-ext-ledger dsh-ext-web-shot"
+EXTS="dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro dsh-ext-ledger dsh-ext-web-shot dsh-ext-voice"
 if [ "$LSP_OK" = 1 ]; then
   EXTS="$EXTS dsh-ext-lsp"
 elif [ -d "$PROFILE/node_modules/dsh-ext-lsp" ]; then

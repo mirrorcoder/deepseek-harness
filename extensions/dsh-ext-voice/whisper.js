@@ -1,11 +1,12 @@
-// Voice notes into text, on this machine.
+// Speech into text, on this machine.
 //
-// A Telegram voice note is Ogg/Opus. whisper.cpp wants 16 kHz WAV, and
-// `opusdec` from opus-tools converts one to the other without dragging in the
-// whole of ffmpeg. The model is not baked into the image: it is fetched into
-// $DSH_HOME/models on the first voice note and kept across updates, so the
-// image stays small and a deployment that never receives voice never pays for
-// it.
+// whisper.cpp wants 16 kHz WAV. Two kinds of input arrive: a Telegram voice
+// note is Ogg/Opus, which `opusdec` from opus-tools converts without dragging
+// in the whole of ffmpeg; the web composer's microphone sends WAV already,
+// because the browser does the resampling (see client.js) — so that path needs
+// no converter at all. The model is not baked into the image: it is fetched
+// into $DSH_HOME/models on first use and kept across updates, so the image
+// stays small and a deployment that never hears a voice never pays for it.
 //
 // Everything that touches the filesystem, the network or a subprocess is
 // injected, so the pipeline is testable without any of them.
@@ -75,9 +76,23 @@ export async function ensureModel(dir, model, deps = {}) {
   return path
 }
 
+/** RIFF/WAVE, the only container whisper reads without a converter. */
+export function isWav(bytes) {
+  const b = Buffer.from(bytes ?? [])
+  return b.length > 44 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WAVE'
+}
+
+/** Seconds of audio in a PCM WAV, from its header; undefined when unreadable. */
+export function wavSeconds(bytes) {
+  const b = Buffer.from(bytes ?? [])
+  if (!isWav(b)) return undefined
+  const byteRate = b.readUInt32LE(28)
+  return byteRate > 0 ? (b.length - 44) / byteRate : undefined
+}
+
 /**
- * One voice note to text.
- * @param {Buffer} audio - the Ogg/Opus bytes Telegram served.
+ * Speech to text.
+ * @param {Buffer} audio - Ogg/Opus (a Telegram voice note) or WAV (the web microphone).
  * @param {{modelDir: string, model: string, language: string, threads: number,
  *          whisper?: string, opusdec?: string, run?: Function}} options
  */
@@ -86,10 +101,14 @@ export async function transcribe(audio, options) {
   const work = join(tmpdir(), `dsh-voice-${randomUUID()}`)
   await mkdir(work, { recursive: true })
   try {
-    const ogg = join(work, 'in.ogg')
     const wav = join(work, 'in.wav')
-    await writeFile(ogg, audio)
-    await runner(options.opusdec ?? 'opusdec', ['--quiet', '--rate', '16000', ogg, wav], { timeoutMs: 60_000 })
+    if (isWav(audio)) {
+      await writeFile(wav, audio)
+    } else {
+      const ogg = join(work, 'in.ogg')
+      await writeFile(ogg, audio)
+      await runner(options.opusdec ?? 'opusdec', ['--quiet', '--rate', '16000', ogg, wav], { timeoutMs: 60_000 })
+    }
     const model = await ensureModel(options.modelDir, options.model, options.modelDeps)
     const { stdout } = await runner(options.whisper ?? 'whisper-cli', [
       '-m', model,

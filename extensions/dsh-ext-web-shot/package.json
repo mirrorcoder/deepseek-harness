@@ -1,6 +1,6 @@
 {
   "name": "dsh-ext-web-shot",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "description": "Look at a web page: screenshot and rendered text through headless Chromium inside the container",
   "type": "module",
   "main": "index.js",

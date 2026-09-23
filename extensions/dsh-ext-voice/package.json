@@ -1,0 +1,14 @@
+{
+  "name": "dsh-ext-voice",
+  "version": "0.1.1",
+  "description": "Speech into text on this machine: a microphone in the web composer and the service Telegram voice notes use",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "whisper.js", "client.js", "mic.browser.js", "cordis.patch.yml", "test-whisper.mjs", "test-client.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*"
+  }
+}

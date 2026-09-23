@@ -14,11 +14,15 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { dirname, join, normalize, relative } from 'node:path'
 
 const IMPORT = /(?:^|[\s;])(?:import|export)\s[^'"]*?from\s*['"](\.{1,2}\/[^'"]+)['"]|import\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g
+// A file read at runtime next to the module (`new URL('./x', import.meta.url)`)
+// is just as missing when it is not shipped — and fails just as silently.
+const URL_REF = /new URL\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*,\s*import\.meta\.url\s*\)/g
 
-/** Relative specifiers a module imports. */
+/** Relative specifiers a module imports or reads beside itself. */
 export function relativeImports(source) {
   const found = []
   for (const match of source.matchAll(IMPORT)) found.push(match[1] ?? match[2])
+  for (const match of source.matchAll(URL_REF)) found.push(match[1])
   return found
 }
 

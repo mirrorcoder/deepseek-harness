@@ -12,6 +12,65 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.23.1 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+Two defects the first live use found within the hour.
+
+- **Fixed: dictated text went in twice, with an error on top.** The composer
+  is a Lexical editor, and Lexical renders on its own tick: right after the
+  insert the page still shows the old text. The microphone checked
+  synchronously, concluded the insert had failed, inserted the same words a
+  second time through the paste fallback and reported an error — the operator
+  saw "Слышишь?Слышишь?" under a red pill. The result is now judged only after
+  the editor has rendered, and the fallback runs only when the first way really
+  did nothing.
+- **Fixed: screenshots hung on any page that keeps a connection open.** The
+  first version used Chromium's own `--screenshot` with a virtual-time budget,
+  and virtual time only advances while the network is idle — on a page holding
+  an SSE stream, a websocket or a long poll it never is. The harness's own UI
+  is such a page; so are most apps worth checking. `screenshot` and `page_text`
+  now drive the browser over the DevTools protocol with Node's built-in
+  WebSocket: navigate, wait for the load event (capped), wait the requested
+  real time for the page's scripts, capture. They also report the main
+  document's HTTP status, and `page_text` reads the rendered `innerText`
+  instead of stripping tags from a DOM dump. A regression test serves a page
+  with a never-ending event stream and a script that renders late, and
+  requires both to be captured.
+- **Fixed: throwaway browser profiles piled up in `/tmp`.** A killed Chromium
+  keeps writing to its profile for a moment, and removing the directory right
+  away raced it (`ENOTEMPTY`) — the directory survived every capture. The
+  capture now waits for the browser to really exit before returning, and the
+  removal retries.
+
+## v1.23.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+Deployed, never tagged on its own: its two defects were found in the first
+hour, and it went into the repository together with the fixes as `v1.23.1`.
+
+- **A microphone in the web composer** (`dsh-ext-voice`). Beside the paperclip:
+  click to record, click again to stop, Esc to cancel. The browser decodes what
+  it recorded — WebM in Chrome, MP4 in Safari, Ogg in Firefox — and resamples
+  it to 16 kHz mono WAV itself, which is exactly what whisper reads, so the
+  server needs no converter. The transcript is inserted into the composer where
+  the caret is, not sent: dictation makes mistakes, and the operator fixes them
+  before anything reaches the agent. The composer is a Lexical editor, so the
+  text goes in through the editing events it listens to rather than by writing
+  to the element. The button is anchored on the composer's hidden file input,
+  which the upstream markup keeps next to the paperclip, and re-placed whenever
+  the app re-renders the composer.
+- **One speech service for the box.** Whisper moved out of the Telegram bridge
+  into `ctx.voice`; the web microphone and Telegram voice notes both go through
+  it, so there is one model, one download and one queue — two surfaces asking
+  at once wait their turn instead of running two CPU-heavy transcriptions side
+  by side.
+- The deploy-time shipping check now also follows files a module reads beside
+  itself (`new URL('./x', import.meta.url)`): a missing browser script would
+  have failed exactly as silently as the missing module did in v1.21.0.
+
 ## v1.22.0 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.

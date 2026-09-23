@@ -1,8 +1,8 @@
-// Voice notes into text. Run inside the dsh container:
-//   node --test /data/dsh/profiles/web/node_modules/dsh-ext-telegram/test-voice.mjs
+// Speech into text. Run inside the dsh container:
+//   node --test /data/dsh/profiles/web/node_modules/dsh-ext-voice/test-whisper.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanTranscript, ensureModel, transcribe } from './voice.js'
+import { cleanTranscript, ensureModel, isWav, transcribe, wavSeconds } from './whisper.js'
 
 test('silence markers are not words', () => {
   assert.equal(cleanTranscript(' [BLANK_AUDIO] '), '')
@@ -45,4 +45,37 @@ test('a failed download says so instead of leaving a broken model', async () => 
     exists: async () => false,
     fetch: async () => ({ ok: false, status: 404, body: null }),
   }), /HTTP 404/)
+})
+
+/** A minimal PCM WAV: 16 kHz, mono, 16-bit, `seconds` of silence. */
+function wav(seconds = 1) {
+  const samples = Math.round(16000 * seconds)
+  const b = Buffer.alloc(44 + samples * 2)
+  b.write('RIFF', 0); b.writeUInt32LE(36 + samples * 2, 4); b.write('WAVE', 8)
+  b.write('fmt ', 12); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22)
+  b.writeUInt32LE(16000, 24); b.writeUInt32LE(32000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34)
+  b.write('data', 36); b.writeUInt32LE(samples * 2, 40)
+  return b
+}
+
+test('a WAV from the browser skips the converter entirely', async () => {
+  const calls = []
+  const text = await transcribe(wav(2), {
+    modelDir: '/tmp/models', model: 'small-q5_1', language: 'ru', threads: 2,
+    modelDeps: { exists: async () => true },
+    run: async (command) => {
+      calls.push(command)
+      return { stdout: command === 'whisper-cli' ? 'Проверка микрофона.' : '' }
+    },
+  })
+  assert.equal(text, 'Проверка микрофона.')
+  assert.deepEqual(calls, ['whisper-cli'], 'opusdec не нужен, браузер уже прислал 16 кГц WAV')
+})
+
+test('the header says what the bytes are and how long they last', () => {
+  assert.equal(isWav(wav(1)), true)
+  assert.equal(isWav(Buffer.from('OggS....')), false)
+  assert.equal(isWav(undefined), false)
+  assert.equal(Math.round(wavSeconds(wav(3))), 3)
+  assert.equal(wavSeconds(Buffer.from('not audio')), undefined)
 })
