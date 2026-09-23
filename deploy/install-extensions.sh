@@ -13,8 +13,54 @@ DSH_HOME="${DSH_HOME:-/data/dsh}"
 EXT_DIR="${EXT_DIR:-/opt/dsh/extensions}"
 PROFILE="$DSH_HOME/profiles/web"
 
+# ── upstream packages the app does not ship ───────────────────────────────
+# Some upstream plugins are published outside the app's dependency closure, and
+# a plugin row resolves names from the PROFILE — the image's copy alone is not
+# enough. Each is installed from that copy (so its version travels with the
+# image and no network is needed) and replaced when the profile's copy drifts:
+# the profile copy is what a row actually loads, and a package left a release
+# behind the host is a seam whose shape quietly stops matching. A failure is
+# never fatal here; it only keeps the rows that need the package out of the
+# composition, which is a harness without that feature rather than a harness
+# that cannot boot.
+RUNTIME_MODULES=/opt/dsh-runtime/node_modules
+pkg_version() { node -p "require('$1/package.json').version" 2>/dev/null || echo none; }
+install_upstream() { # install_upstream <@scope/name> → 0 when the profile has the image's version
+  pkg="$1"
+  src="$RUNTIME_MODULES/$pkg"
+  [ -d "$src" ] || return 1
+  have="$(pkg_version "$PROFILE/node_modules/$pkg")"
+  want="$(pkg_version "$src")"
+  [ "$have" != none ] && [ "$have" = "$want" ] && return 0
+  [ "$have" = none ] || dsh plugin --profile web remove "$pkg" >/dev/null 2>&1 || true
+  dsh plugin --profile web add "file:$src" >/dev/null 2>&1
+}
+
+echo "→ upstream packages outside the app closure"
+DSH_PRESET_RECALL=0
+if install_upstream @deepseek-ai/dsh-tool-session-query; then
+  DSH_PRESET_RECALL=1
+  echo "   ✓ recall tools $(pkg_version "$PROFILE/node_modules/@deepseek-ai/dsh-tool-session-query")"
+else
+  echo "   !! recall tools unavailable — the preset will be built without them" >&2
+fi
+export DSH_PRESET_RECALL
+LSP_OK=1
+for pkg in @deepseek-ai/dsh-lsp @deepseek-ai/dsh-lsp-stdio @deepseek-ai/dsh-tool-lsp; do
+  install_upstream "$pkg" || LSP_OK=0
+done
+[ "$LSP_OK" = 1 ] && echo "   ✓ lsp packages" || echo "   !! lsp packages unavailable — dsh-ext-lsp will not be mounted" >&2
+
 echo "→ installing extensions into $PROFILE"
-for ext in dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro; do
+EXTS="dsh-ext-version dsh-ext-image-gen dsh-ext-peak-guard dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro dsh-ext-ledger dsh-ext-web-shot"
+if [ "$LSP_OK" = 1 ]; then
+  EXTS="$EXTS dsh-ext-lsp"
+elif [ -d "$PROFILE/node_modules/dsh-ext-lsp" ]; then
+  # Its rows name packages that are not there: leaving the bundle in would stop
+  # the composition from booting.
+  dsh plugin --profile web remove dsh-ext-lsp >/dev/null 2>&1 || true
+fi
+for ext in $EXTS; do
   [ -d "$EXT_DIR/$ext" ] || { echo "!! missing $EXT_DIR/$ext" >&2; exit 1; }
   # pnpm treats a `file:` directory with an unchanged version as up to date and
   # keeps the stale copy — remove first so the new image's code really lands.
@@ -28,32 +74,6 @@ node -e '
 const m = JSON.parse(require("fs").readFileSync(process.argv[1] + "/package.json", "utf8"));
 console.log("   bundles:", m.dsh.profile.bundles.join(", "));
 ' "$PROFILE"
-
-# The recall tools (session_event_search / session_event_read) are published
-# outside the app's dependency closure, and an agent preset resolves plugin
-# names from the PROFILE — the image copy alone is not enough. Installed from
-# that copy rather than from the registry, so the version travels with the
-# image and the step needs no network. A failure here is not fatal: the preset
-# is then built without the row, which is a harness with no recall rather than
-# a harness that cannot open a session.
-RECALL_SRC="/opt/dsh-runtime/node_modules/@deepseek-ai/dsh-tool-session-query"
-RECALL_PKG="@deepseek-ai/dsh-tool-session-query"
-DSH_PRESET_RECALL=0
-pkg_version() { node -p "require('$1/package.json').version" 2>/dev/null || echo none; }
-have="$(pkg_version "$PROFILE/node_modules/$RECALL_PKG")"
-want="$(pkg_version "$RECALL_SRC")"
-if [ "$have" != none ] && [ "$have" = "$want" ]; then
-  DSH_PRESET_RECALL=1
-elif [ -d "$RECALL_SRC" ]; then
-  # A version drift is not cosmetic: the profile copy is what the preset row
-  # actually loads, so a tool package left a release behind the host is a seam
-  # whose shape quietly stops matching. Replace rather than keep.
-  [ "$have" = none ] || dsh plugin --profile web remove "$RECALL_PKG" >/dev/null 2>&1 || true
-  if dsh plugin --profile web add "file:$RECALL_SRC" >/dev/null 2>&1; then DSH_PRESET_RECALL=1; fi
-fi
-export DSH_PRESET_RECALL
-[ "$DSH_PRESET_RECALL" = "1" ] && echo "   ✓ recall tools ${want} (session_event_search / session_event_read)" \
-  || echo "   !! recall tools unavailable — the preset will be built without them" >&2
 
 echo "→ materialising agent preset: pro"
 SRC="$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh-agent-presets/presets/standard"

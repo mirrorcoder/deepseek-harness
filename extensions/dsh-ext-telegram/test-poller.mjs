@@ -10,7 +10,7 @@ const message = (id, text, extra = {}) => ({
 })
 
 test('a chat is extracted from every update shape, with a readable name', () => {
-  assert.deepEqual(chatOf(message(1, 'hi')), { id: '7', title: 'Roman', type: 'private', text: 'hi', photo: undefined, threadId: undefined })
+  assert.deepEqual(chatOf(message(1, 'hi')), { id: '7', title: 'Roman', type: 'private', text: 'hi', photo: undefined, threadId: undefined, voice: undefined, voiceSeconds: undefined })
   assert.equal(chatOf({ my_chat_member: { chat: { id: -100, type: 'supergroup', title: 'Ops' } } }).title, 'Ops')
   assert.equal(chatOf({}), undefined)
 })
@@ -136,4 +136,14 @@ test('an ordinary failure backs off and keeps going until stopped', async () => 
   assert.deepEqual(waits, [1000, 2000], 'the wait doubles')
   assert.equal(poller.conflict, false)
   assert.equal(attempts, 3)
+})
+
+test('a voice note arrives as a file to transcribe, with its length', () => {
+  const voice = chatOf({ message: { voice: { file_id: 'v1', duration: 12 }, chat: { id: 7, type: 'private' }, message_thread_id: 5 } })
+  assert.equal(voice.voice, 'v1')
+  assert.equal(voice.voiceSeconds, 12)
+  assert.equal(voice.threadId, 5, 'ответ на голосовое идёт в тот же тред')
+  assert.equal(voice.text, undefined)
+  // an audio file sent instead of a voice note is heard the same way
+  assert.equal(chatOf({ message: { audio: { file_id: 'a1', duration: 40 }, chat: { id: 7, type: 'private' } } }).voice, 'a1')
 })

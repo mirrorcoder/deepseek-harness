@@ -12,6 +12,82 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.21.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+Five things an operator notices on the first day.
+
+- **What it cost, every evening** (`dsh-ext-ledger`). Money is read from the
+  provider's own balance: DeepSeek reports it, and the sum of its decreases
+  over a day is exactly what was billed — whatever the model, the cache ratio
+  or the peak discount — while an increase is a top-up and is ignored. The
+  day's series starts from yesterday's last reading, so the spend between
+  midnight and the first reading of the day, or across a restart, still lands
+  somewhere. Tokens come from the request stream, exact, tagged with the
+  project each session runs in. At the configured hour a report goes to
+  Telegram: spend, balance, per-project tokens and cache ratio, and the
+  sessions that were worked on. A daily budget warns once at 80 % and once
+  when exceeded; a low balance warns once a day. `/cost` shows the same report
+  on demand; budget, hour and thresholds live in Settings → ledger.
+- **Reports get their own topic.** Other extensions reach the operator through
+  a `telegram/notify` event, and the bridge posts those into one dedicated
+  "📊 Отчёты и бюджет" topic instead of whichever session thread was last
+  active, so a budget warning never lands in the middle of a conversation. A
+  message written in that topic gets a hint rather than a new session.
+- **"Ночью" means the cheap hours** (`offpeak_slot`, `/night`). The tool
+  answers from the same pricing calendar the peak guard uses: whether now is
+  peak, when the next off-peak stretch starts and ends, and when tonight is on
+  the local clock. `/night <задача>` asks the agent to run the task now if it
+  is already off-peak and otherwise to put it on the schedule — in the same
+  session, so the result comes back to the same thread.
+- **Voice notes are tasks.** A voice note sent to the bot is transcribed on this
+  machine by whisper.cpp — built into the image, one transcription at a time —
+  and handled exactly like typed text, after echoing back what was heard so a
+  misheard word is caught before the agent acts on it. The model is not baked
+  into the image: it is fetched into `$DSH_HOME/models` on the first voice note
+  and kept across updates. `opusdec` does the Ogg-to-WAV step without pulling
+  in all of ffmpeg.
+- **The agent can look at a web page** (`dsh-ext-web-shot`: `screenshot`,
+  `page_text`). Headless Chromium runs inside the container, one process per
+  call with a throwaway profile, and the page's own scripts get a time budget
+  before the capture, so a client-rendered app is photographed after it
+  rendered. Only http(s) addresses. No external screenshot service: anyone who
+  builds this repository gets the same tool.
+- **Code navigation through real language servers** (`dsh-ext-lsp`):
+  definitions, every use, implementations and hover for Python (pyright) and
+  TypeScript/JavaScript (typescript-language-server), both installed in the
+  image. The three upstream packages sit outside the app's dependency closure,
+  so the installer puts them into the profile first — and mounts the bundle
+  only when all three are really there, because a row naming a plugin that
+  does not resolve stops the whole composition from booting.
+- **Fixed within the release: the Telegram bridge did not load.** `voice.js`
+  was in the repository and in the image but not in the bridge's package
+  `files`, and the profile install copies only what that list names — so the
+  installed bridge could not import it and silently failed to mount. Tests
+  passed, because they import pure modules; the deploy passed, because a
+  plugin that fails to mount does not stop the harness. The bot was down for
+  about ten minutes. `deploy/check-extensions.mjs` now walks every extension's
+  imports from its entry point and fails the deploy, before anything is built,
+  when one of them would not be shipped.
+- **Verified live, one run each.** A real recording through the whole voice
+  path — Ogg, `opusdec`, whisper, first-use model download — transcribed word
+  for word in 11 s, 8 s once the model is on disk. A page screenshot takes 2 s
+  and its rendered text 1 s. In a real session the agent reached for
+  `offpeak_slot`, `lsp` and `screenshot` on its own, and the report hour moved
+  to the current hour produced the report in a new "📊 Отчёты и бюджет" topic.
+- **Fixed after that run: screenshots landed inside the project.** The first
+  one was written to `screenshots/` in the operator's own repository, an
+  untracked directory in someone's git tree. They now go to
+  `/workspace/screenshots/<project>`.
+- **Known limit of the LSP route:** pyright only follows imports it can
+  resolve, so in a monorepo whose packages live under `apps/*/src` a
+  cross-file `findReferences` returns the in-file uses only until the project
+  declares its source roots. On the live run the agent noticed the gap itself
+  and cross-checked with grep.
+- The installer now handles every such upstream package the same way: from
+  the image's copy, version-checked against the profile, never fatal.
+
 ## v1.20.1 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.

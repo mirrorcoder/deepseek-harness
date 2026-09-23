@@ -8,6 +8,11 @@ cd "$(dirname "$0")"
 if [ "${1:-}" != "--no-pull" ]; then
   git -C .. pull --ff-only
 fi
+# Before anything is built or restarted: every extension must ship what it
+# imports. A module left out of package.json "files" is not a build error and
+# not a test failure — the plugin that needs it just fails to mount after the
+# restart. That took the Telegram bridge down once (v1.21.0).
+node ./check-extensions.mjs ../extensions
 # Image tag and the baked stamp both follow our own VERSION file.
 FORK_VERSION="$(tr -d ' \n\r' < ../VERSION)"
 FORK_COMMIT="$(git -C .. rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
@@ -71,7 +76,7 @@ i=0; while [ $i -lt 90 ]; do
   i=$((i+1)); sleep 2
 done
 echo "→ extension tests"
-docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro; do printf "   %-26s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done' || echo "   !! тесты прогнать не удалось (контейнер перезапускается?)"
+docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro dsh-ext-ledger dsh-ext-web-shot dsh-ext-lsp; do printf "   %-26s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done' || echo "   !! тесты прогнать не удалось (контейнер перезапускается?)"
 echo "→ running build: $(docker exec dsh sh -c 'cat /opt/dsh/build-info.json' | tr -d "\n ")"
 
 # Every build leaves behind the cache that produced it and the tag it replaced.

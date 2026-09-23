@@ -11,7 +11,8 @@
 //   $DSH_HOME/settings.yaml under `peak-guard:`.
 import z from '@deepseek-ai/schemastery'
 import { LlmError } from '@deepseek-ai/dsh-llm'
-import { DEFAULT_HOLIDAYS, DEFAULT_PEAK_WINDOWS, RollingMeter, isPeak, nextBoundary } from './schedule.js'
+import { DEFAULT_HOLIDAYS, DEFAULT_PEAK_WINDOWS, RollingMeter, isPeak, localText, nextBoundary, offPeakSlot } from './schedule.js'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'ext-peak-guard'
 export const inject = ['llm']
@@ -178,6 +179,53 @@ export function apply(ctx, initial) {
   })
 
   // 4. `/peak` status command.
+  // ── offpeak_slot: "do it at night / when it is cheaper" ───────────────────
+  //
+  // The schedule tools can fire a task at any time; what they cannot know is
+  // when DeepSeek is cheap. This answers exactly that, from the same calendar
+  // the guard itself uses, so "ночью" becomes a reminder at the right minute
+  // in the same session instead of a guess.
+  ctx.inject(['tools'], (tctx) => {
+    tctx.effect(() => tctx.tools.register(defineTool({
+      name: 'offpeak_slot',
+      description: [
+        'Tell when DeepSeek is cheap. Off-peak costs half of peak; peak is 01:00–04:00 and 06:00–10:00 UTC on weekdays, everything else is off-peak.',
+        'Use it when the user asks to do something at night, later when it is cheaper, or says "ночью" / "в дешёвые часы".',
+        'If now_is_peak is false the cheap rate already applies — just do the task now.',
+        'Otherwise schedule it with schedule_create (kind "at") at soonest_utc — or tonight_utc when the user literally said tonight — and put the COMPLETE task in the reminder prompt, because that prompt is all the future turn will see.',
+      ].join(' '),
+      parameters: {},
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            now_is_peak: { type: 'boolean' },
+            soonest_utc: { type: 'string' },
+            soonest_local: { type: 'string' },
+            cheap_until_local: { type: 'string' },
+            tonight_utc: { type: 'string' },
+            tonight_local: { type: 'string' },
+          },
+        },
+        render: (_args, value) => [{ type: 'text', text: value.now_is_peak
+          ? `Сейчас пик. Дешёвое время с ${value.soonest_local}${value.cheap_until_local ? ` до ${value.cheap_until_local}` : ''}; ночью — ${value.tonight_local}.`
+          : `Сейчас уже дешёвое время${value.cheap_until_local ? ` (до ${value.cheap_until_local})` : ''} — можно делать сразу.` }],
+      },
+      presentCall: () => ({ card: 'generic', title: 'Когда дешевле', kind: 'other', rawInput: {} }),
+      async execute() {
+        const zone = process.env.TZ || 'UTC'
+        const slot = offPeakSlot(new Date(), { windows: config.peakWindows, holidays: config.holidays, timeZone: zone })
+        return {
+          now_is_peak: slot.nowIsPeak,
+          ...(slot.soonest === undefined ? {} : { soonest_utc: slot.soonest.toISOString(), soonest_local: localText(slot.soonest, zone) }),
+          ...(slot.soonestEnds === undefined ? {} : { cheap_until_local: localText(slot.soonestEnds, zone) }),
+          ...(slot.tonight === undefined ? {} : { tonight_utc: slot.tonight.toISOString(), tonight_local: localText(slot.tonight, zone) }),
+        }
+      },
+    })), 'ext-peak-guard: offpeak_slot')
+  })
+
   ctx.inject(['commands'], (cctx) => {
     cctx.effect(() => cctx.commands.register({
       name: 'peak',

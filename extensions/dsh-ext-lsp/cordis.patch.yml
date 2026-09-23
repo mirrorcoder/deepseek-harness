@@ -1,0 +1,37 @@
+# Code navigation through real language servers: go to definition, find every
+# use, go to implementation, hover — for Python and TypeScript/JavaScript.
+#
+# Three upstream rows. `dsh-lsp` is the seam, `dsh-lsp-stdio` launches the
+# servers (lazily, one per workspace, on the first query), `dsh-tool-lsp` is
+# the model-facing `lsp` tool. The servers themselves — pyright and
+# typescript-language-server — are installed by the image. The three packages
+# are installed into the profile by deploy/install-extensions.sh, which adds
+# this bundle only when they really are there: a row naming a plugin that does
+# not resolve stops the whole composition from booting.
+- insert:
+    - id: lsp
+      name: '@deepseek-ai/dsh-lsp'
+    - id: lsp-stdio
+      name: '@deepseek-ai/dsh-lsp-stdio'
+      config:
+        servers:
+          python:
+            command: pyright-langserver
+            args: ['--stdio']
+            extensionToLanguage:
+              '.py': python
+              '.pyi': python
+          typescript:
+            command: typescript-language-server
+            args: ['--stdio']
+            extensionToLanguage:
+              '.ts': typescript
+              '.tsx': typescriptreact
+              '.mts': typescript
+              '.cts': typescript
+              '.js': javascript
+              '.jsx': javascriptreact
+              '.mjs': javascript
+              '.cjs': javascript
+    - id: tool-lsp
+      name: '@deepseek-ai/dsh-tool-lsp'

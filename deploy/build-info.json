@@ -1,5 +1,5 @@
 {
-  "forkVersion": "1.20.1",
+  "forkVersion": "1.21.0",
   "upstreamBase": "dsh-v0.1.5-rc.3",
   "upstreamNpm": "0.1.5-rc.3",
   "releasedAt": "2026-09-23",
@@ -11,13 +11,16 @@
     "dsh-ext-efficiency": "0.1.0",
     "dsh-ext-host": "0.1.0",
     "dsh-ext-image-gen": "0.1.0",
+    "dsh-ext-ledger": "0.1.0",
+    "dsh-ext-lsp": "0.1.0",
     "dsh-ext-memory": "0.1.0",
     "dsh-ext-peak-guard": "0.1.0",
     "dsh-ext-prune-pro": "0.1.0",
     "dsh-ext-remote-console": "0.1.0",
-    "dsh-ext-telegram": "0.10.1",
+    "dsh-ext-telegram": "0.11.0",
     "dsh-ext-toolbelt": "0.1.0",
     "dsh-ext-version": "0.1.0",
+    "dsh-ext-web-shot": "0.1.1",
     "dsh-ext-workspace-picker": "0.1.0"
   }
 }

@@ -79,3 +79,47 @@ export class RollingMeter {
     return Math.max(1, Math.ceil((this.events[0][0] + this.windowMs - now) / 1000))
   }
 }
+
+/** "2026-09-23 23:00 (Europe/Moscow)" — for a human reading the answer. */
+export function localText(at, timeZone) {
+  const text = new Intl.DateTimeFormat('sv-SE', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(at)
+  return `${text} (${timeZone})`
+}
+
+function localHourOf(at, timeZone) {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hour12: false }).format(at)) % 24
+}
+
+/**
+ * When the next cheap stretch starts, how long it lasts, and when "tonight" is.
+ *
+ * `soonest` is now when now is already off-peak — most of the day is — so a
+ * request to "do it when it is cheaper" that arrives off-peak should simply run.
+ * `tonight` is the next `nightHour` on the local clock, moved past a peak window
+ * if one happens to cover it, for when the operator literally said "at night".
+ */
+export function offPeakSlot(at, options = {}) {
+  const windows = options.windows ?? DEFAULT_PEAK_WINDOWS
+  const holidays = options.holidays ?? DEFAULT_HOLIDAYS
+  const zone = options.timeZone ?? 'UTC'
+  const nightHour = options.nightHour ?? 23
+  const nowIsPeak = isPeak(at, windows, holidays)
+  const soonest = nowIsPeak ? nextBoundary(at, windows, holidays) : new Date(at)
+  const soonestEnds = soonest === undefined ? undefined : nextBoundary(soonest, windows, holidays)
+
+  let tonight
+  const probe = new Date(at)
+  probe.setUTCSeconds(0, 0)
+  probe.setUTCMinutes(Math.ceil(probe.getUTCMinutes() / 15) * 15)
+  for (let i = 0; i < 4 * 48; i++) {
+    if (probe > at && localHourOf(probe, zone) === nightHour && probe.getUTCMinutes() === 0) {
+      tonight = new Date(probe)
+      break
+    }
+    probe.setUTCMinutes(probe.getUTCMinutes() + 15)
+  }
+  if (tonight !== undefined && isPeak(tonight, windows, holidays)) tonight = nextBoundary(tonight, windows, holidays)
+  return { nowIsPeak, soonest, soonestEnds, tonight }
+}

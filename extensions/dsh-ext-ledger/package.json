@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-ledger",
+  "version": "0.1.0",
+  "description": "Spend ledger: exact tokens per project, real money from the provider balance, a daily Telegram report and a daily budget warning",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "core.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-credentials": "*"
+  }
+}

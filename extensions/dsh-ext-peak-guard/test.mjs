@@ -87,3 +87,33 @@ test('guard: off-peak budget is separate; action=warn never declines; disabled i
   off.record({ inputTokens: 50, outputTokens: 0 })
   assert.equal(off.check('deepseek', new Date('2026-09-21T02:30:00Z')), undefined)
 })
+
+// ── offpeak_slot: when "ночью" should fire ────────────────────────────────
+import { offPeakSlot as slotOf, localText as localOf } from './schedule.js'
+
+test('during peak, the cheap stretch starts when the window closes and runs until the next one', () => {
+  const at = new Date('2026-09-22T07:00:00Z') // вторник, внутри пика 06–10 UTC
+  const slot = slotOf(at, { timeZone: 'Europe/Moscow' })
+  assert.equal(slot.nowIsPeak, true)
+  assert.equal(slot.soonest.toISOString(), '2026-09-22T10:00:00.000Z')
+  assert.equal(slot.soonestEnds.toISOString(), '2026-09-23T01:00:00.000Z')
+})
+
+test('off-peak, the soonest cheap moment is now', () => {
+  const at = new Date('2026-09-22T12:00:00Z')
+  const slot = slotOf(at, { timeZone: 'Europe/Moscow' })
+  assert.equal(slot.nowIsPeak, false)
+  assert.equal(slot.soonest.getTime(), at.getTime())
+})
+
+test('"tonight" is the next 23:00 on the LOCAL clock', () => {
+  const at = new Date('2026-09-22T12:00:00Z') // 15:00 по Москве
+  const slot = slotOf(at, { timeZone: 'Europe/Moscow' })
+  assert.equal(slot.tonight.toISOString(), '2026-09-22T20:00:00.000Z') // 23:00 MSK
+  assert.equal(localOf(slot.tonight, 'Europe/Moscow'), '2026-09-22 23:00 (Europe/Moscow)')
+})
+
+test('a Chinese public holiday is off-peak even on a weekday morning', () => {
+  const slot = slotOf(new Date('2026-09-25T07:00:00Z'), { timeZone: 'UTC' })
+  assert.equal(slot.nowIsPeak, false)
+})

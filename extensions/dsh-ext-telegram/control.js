@@ -15,6 +15,8 @@ const HELP = [
   '/workspaces — проекты, новая сессия по нажатию',
   '/new [проект] — новая сессия сразу',
   '/mode — режим доступа: чтение, запись в проекте, полный',
+  '/night <задача> — сделать в дешёвые часы DeepSeek',
+  '🎙 голосовое — расшифрую и выполню как текст',
   '/stop — прервать текущий ход',
   '/status — состояние трансляции',
   '',
@@ -177,6 +179,22 @@ export class Bindings {
   }
 }
 
+/**
+ * The instruction a `/night` task travels with. The agent does the scheduling
+ * itself, with the two tools that know the price calendar and the clock, so
+ * the result lands in this same session and thread when it runs.
+ */
+export function nightPrompt(task) {
+  return [
+    'Отложи эту задачу на дешёвые часы DeepSeek.',
+    'Вызови `offpeak_slot`: если сейчас уже внепиковое время — выполни задачу сразу;',
+    'иначе поставь её через `schedule_create` (kind `at`) на время `soonest` из ответа,',
+    'а в prompt напоминания запиши задачу полностью, своими словами не сокращая. Сейчас больше ничего не делай.',
+    '',
+    `Задача: ${task}`,
+  ].join('\n')
+}
+
 /** Start a session, remember it for this chat, and report it. */
 async function openSession(message, deps, cwd) {
   const sessionId = await deps.create(cwd)
@@ -260,6 +278,15 @@ export async function handleMessage(message, deps) {
       if (wanted === undefined) return modeScreen(state)
       return modeScreen(await deps.setMode(sessionId, wanted))
     }
+    case '/night': {
+      if (argument.length === 0) {
+        return 'Напиши задачу после /night — поставлю её на ближайшие дешёвые часы DeepSeek.'
+      }
+      let sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
+      if (sessionId === undefined) sessionId = await openSession(message, deps)
+      await deps.prompt(sessionId, nightPrompt(argument), message)
+      return undefined
+    }
     case '/stop': {
       const sessionId = bindings.resolve(message.chatId, message.threadId, message.threadSession)
       if (sessionId === undefined) return 'Нечего прерывать.'
@@ -268,6 +295,9 @@ export async function handleMessage(message, deps) {
     }
     default: {
       if (command.startsWith('/')) return { text: `Не знаю команду ${command}.\n\n${HELP}`, keyboard: HOME_KEYBOARD }
+      if (deps.isSpecialThread?.(message.chatId, message.threadId)) {
+        return { text: 'Это тред отчётов — задачи сюда не уходят. Напиши в треде нужной сессии или в общий чат.', keyboard: HOME_KEYBOARD }
+      }
       const bound = bindings.resolve(message.chatId, message.threadId, message.threadSession)
       if (bound !== undefined) {
         await deps.prompt(bound, text, message)

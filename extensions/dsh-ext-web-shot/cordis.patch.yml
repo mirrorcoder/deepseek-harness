@@ -1,0 +1,5 @@
+# Host-plane row: the browser is a property of the container, available to
+# every agent. Chromium itself is installed by the image (deploy/Dockerfile).
+- insert:
+    - id: ext-web-shot
+      name: dsh-ext-web-shot

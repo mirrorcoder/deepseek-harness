@@ -1,0 +1,5 @@
+# Host-plane row: usage is recorded for every agent, and the report covers the
+# whole deployment.
+- insert:
+    - id: ext-ledger
+      name: dsh-ext-ledger

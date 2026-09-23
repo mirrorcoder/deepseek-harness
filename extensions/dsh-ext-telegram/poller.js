@@ -28,6 +28,10 @@ export function chatOf(update) {
     text: message?.text ?? message?.caption,
     photo,
     threadId: message?.message_thread_id,
+    // A voice note, or an audio file sent as one; transcribed before it is
+    // treated as a message.
+    voice: message?.voice?.file_id ?? message?.audio?.file_id,
+    voiceSeconds: message?.voice?.duration ?? message?.audio?.duration,
   }
 }
 

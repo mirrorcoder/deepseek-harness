@@ -1,0 +1,15 @@
+{
+  "name": "dsh-ext-web-shot",
+  "version": "0.1.1",
+  "description": "Look at a web page: screenshot and rendered text through headless Chromium inside the container",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "shot.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*",
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}

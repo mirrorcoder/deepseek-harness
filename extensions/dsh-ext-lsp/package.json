@@ -1,0 +1,10 @@
+{
+  "name": "dsh-ext-lsp",
+  "version": "0.1.0",
+  "description": "Code navigation through language servers (pyright, typescript-language-server): definitions, references, implementations, hover",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

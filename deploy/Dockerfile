@@ -7,8 +7,23 @@ ARG DSH_VERSION=0.1.5-rc.3
 FROM node:22-bookworm-slim AS build
 ARG DSH_VERSION
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      python3 make g++ git ca-certificates \
+      python3 make g++ git ca-certificates cmake \
     && rm -rf /var/lib/apt/lists/*
+# Speech to text for Telegram voice notes, built here and shipped as one binary.
+# The MODEL is not baked in: the bridge fetches it into $DSH_HOME/models on the
+# first voice note, so the image stays small and a deployment that never gets
+# voice never pays for it. GGML_NATIVE tunes for the CPU that builds the image,
+# which for this repository is the machine that runs it (deploy/update.sh
+# builds locally); set it OFF when building an image to run elsewhere.
+# OpenMP is off so the binary needs no libgomp at runtime.
+ARG WHISPER_VERSION=v1.9.4
+ARG WHISPER_NATIVE=ON
+RUN git clone --depth 1 --branch "${WHISPER_VERSION}" https://github.com/ggml-org/whisper.cpp /tmp/whisper \
+ && cmake -S /tmp/whisper -B /tmp/whisper/build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+      -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE="${WHISPER_NATIVE}" \
+ && cmake --build /tmp/whisper/build --config Release -j"$(nproc)" --target whisper-cli \
+ && install -m 0755 /tmp/whisper/build/bin/whisper-cli /usr/local/bin/whisper-cli \
+ && rm -rf /tmp/whisper
 # Installed through a manifest rather than `npm install -g` so the separately
 # published recall tools ride the SAME version line as the app: they are not in
 # its dependency closure, and a tool package a minor behind the host is how a
@@ -23,7 +38,10 @@ WORKDIR /opt/dsh-runtime
 # dependency closure, so it has to be asked for by name, at the app's version.
 # It carries the five model-facing tools over the session index — the recall
 # path our compaction checkpoints point at.
-RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"%s"}}' "${DSH_VERSION}" "${DSH_VERSION}" > package.json \
+# The three LSP packages (seam, stdio provider, model tool) are likewise outside
+# the closure; dsh-ext-lsp mounts them once install-extensions.sh has put them
+# into the profile.
+RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"%s","@deepseek-ai/dsh-lsp":"%s","@deepseek-ai/dsh-lsp-stdio":"%s","@deepseek-ai/dsh-tool-lsp":"%s"}}' "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" > package.json \
  && npm install --no-audit --no-fund
 # MCP servers switched on by deploy/features.patch.yml (stdio, launched by dsh).
 RUN npm install -g --no-audit --no-fund \
@@ -43,10 +61,18 @@ LABEL org.opencontainers.image.title="deepseek-harness" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.base.name="@deepseek-ai/dsh@${DSH_VERSION}" \
       org.opencontainers.image.source="https://github.com/mirrorcoder/deepseek-harness"
+# chromium + fonts: dsh-ext-web-shot (screenshot, page_text); DejaVu and
+# Liberation cover Cyrillic, without them a Russian page renders as boxes.
+# opus-tools: `opusdec` turns a Telegram voice note into the WAV whisper reads.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates curl ripgrep procps tini openssh-client jq \
+      chromium fonts-dejavu-core fonts-liberation opus-tools \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g --no-audit --no-fund pnpm@11.7.0
+# Language servers for dsh-ext-lsp. Installed in this stage, not copied from the
+# build stage, so npm lays down the bin links itself.
+RUN npm install -g --no-audit --no-fund pyright typescript typescript-language-server
+COPY --from=build /usr/local/bin/whisper-cli /usr/local/bin/whisper-cli
 COPY --from=build /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=build /opt/dsh-runtime /opt/dsh-runtime
 # npm's bin entries are symlinks; COPY would flatten them into files outside

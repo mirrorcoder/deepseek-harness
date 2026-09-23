@@ -32,6 +32,8 @@ import { panelRows } from './panel.js'
 import { UpdatePoller } from './poller.js'
 import { Bindings, handleCallback, handleMessage } from './control.js'
 import { AskDesk } from './ask.js'
+import { transcribe } from './voice.js'
+import { join as joinPath } from 'node:path'
 import { topicSpec, topicName, workspaceOf } from './topics.js'
 import { RunView } from './run-view.js'
 
@@ -75,6 +77,15 @@ export const Config = z.object({
   maxQueue: z.number().default(200),
   /** How often a streaming answer redraws its message; Telegram throttles edits. */
   editIntervalMs: z.number().default(1800),
+  /** Transcribe voice notes with the local whisper and treat them as typed text. */
+  voice: z.boolean().default(true),
+  /** whisper.cpp model name; fetched once into $DSH_HOME/models on first use. */
+  voiceModel: z.string().default('small-q5_1'),
+  /** Spoken language, or `auto`. Pinning it is faster and more accurate. */
+  voiceLanguage: z.string().default('ru'),
+  voiceThreads: z.number().default(3),
+  /** Longest voice note accepted, in seconds; a CPU transcription is not free. */
+  voiceMaxSeconds: z.number().default(300),
 })
 
 const SETTINGS_NS = 'telegram'
@@ -175,6 +186,8 @@ export function apply(ctx, initial) {
   // ── the remote control ────────────────────────────────────────────────────
   /** `chatId:threadId` → session id, so a reply in a thread lands in its session. */
   const threadSessions = new Map()
+  /** `chatId:threadId` of topics that belong to no session (reports and alerts). */
+  const specialThreads = new Set()
   const bindings = new Bindings()
 
   const controlDeps = {
@@ -194,6 +207,7 @@ export function apply(ctx, initial) {
     },
     workspaces: () => listWorkspaces(),
     workspaceOf,
+    isSpecialThread: (chatId, threadId) => specialThreads.has(`${chatId}:${threadId ?? ''}`),
     adopt: (chatId, threadId, sessionId) => adoptThread(chatId, threadId, sessionId),
     create: async (cwd) => {
       const controller = ctx.get('sessionController')
@@ -302,6 +316,92 @@ export function apply(ctx, initial) {
     }
   }
 
+  // ── voice: a spoken task is a task ────────────────────────────────────────
+  //
+  // Transcribed on this machine by whisper.cpp; one at a time, because a CPU
+  // transcription competes with everything else the box runs. What was heard is
+  // echoed back first, so a misheard word is caught before the agent acts on it.
+  let voiceQueue = Promise.resolve()
+  const hearVoice = (ref, chat) => {
+    const job = voiceQueue.then(async () => {
+      const say = async (text) => {
+        const token = await getToken(ref)
+        if (token === undefined || token.length === 0) return
+        await callTelegram(token, 'sendMessage', {
+          chat_id: chat.id,
+          text,
+          ...(chat.threadId === undefined ? {} : { message_thread_id: chat.threadId }),
+        }).catch(note)
+      }
+      if (!config.voice) {
+        await say('Голосовые выключены (telegram.voice). Напиши текстом.')
+        return undefined
+      }
+      if ((chat.voiceSeconds ?? 0) > config.voiceMaxSeconds) {
+        await say(`Голосовое длиннее ${Math.round(config.voiceMaxSeconds / 60)} мин — расшифровывать не буду, разбей на части.`)
+        return undefined
+      }
+      const token = await getToken(ref)
+      if (token === undefined || token.length === 0) return undefined
+      await say('🎙 Слушаю…')
+      try {
+        const audio = await downloadFile(token, chat.voice)
+        const text = await transcribe(audio.data, {
+          modelDir: joinPath(process.env.DSH_HOME ?? '/data/dsh', 'models'),
+          model: config.voiceModel,
+          language: config.voiceLanguage,
+          threads: config.voiceThreads,
+        })
+        if (text.length === 0) {
+          await say('Не расслышал ни слова. Попробуй ещё раз или напиши текстом.')
+          return undefined
+        }
+        await say(`🎙 «${text.length > 900 ? `${text.slice(0, 900)}…` : text}»`)
+        return text
+      } catch (error) {
+        note(error)
+        await say(`Не смог расшифровать: ${error instanceof Error ? error.message : String(error)}`)
+        return undefined
+      }
+    })
+    voiceQueue = job.catch(() => {})
+    return job
+  }
+
+  // ── notices from other extensions: reports, budget, alerts ────────────────
+  //
+  // Anything that wants to reach the operator emits `telegram/notify`; it lands
+  // in one dedicated topic per chat instead of in whichever session thread was
+  // last active, so a budget warning never interrupts a conversation.
+  const SPECIAL_TOPICS = { reports: '📊 Отчёты и бюджет' }
+  const specialThread = async (target, client, topic) => {
+    const title = SPECIAL_TOPICS[topic]
+    if (title === undefined || !target.topicsUsable) return undefined
+    const key = `topic:${topic}`
+    const rows = scope?.get()?.threads ?? []
+    const known = rows.find((row) => String(row.chatId) === String(target.destination.chatId) && row.sessionId === key)
+    if (known !== undefined) return known.threadId
+    const id = await client.createTopic(title)
+    if (id !== undefined) {
+      specialThreads.add(`${target.destination.chatId}:${id}`)
+      await saveThreads(target.destination.chatId, id, key)
+    }
+    return id
+  }
+
+  ctx.on('telegram/notify', (payload) => {
+    const text = String(payload?.text ?? '').trim()
+    if (text.length === 0 || targets.size === 0) return
+    for (const target of targets.values()) {
+      void (async () => {
+        const client = await clientFor(target)
+        if (client === undefined) return
+        const threadId = await specialThread(target, client, payload?.topic).catch(() => undefined)
+        client.postTracked(text, threadId, { parseMode: payload?.html === false ? undefined : 'HTML' })
+      })()
+    }
+  })
+
   // ── the bot answers ───────────────────────────────────────────────────────
   /** token → { poller, chats: Map<id, chat> } */
   const pollers = new Map()
@@ -342,6 +442,7 @@ export function apply(ctx, initial) {
         { command: 'new', description: 'Новая сессия' },
         { command: 'workspaces', description: 'Проекты' },
         { command: 'mode', description: 'Режим доступа этой сессии' },
+        { command: 'night', description: 'Отложить задачу на дешёвые часы DeepSeek' },
         { command: 'stop', description: 'Прервать текущий ход' },
         { command: 'status', description: 'Состояние трансляции' },
         { command: 'help', description: 'Что я понимаю' },
@@ -445,8 +546,14 @@ export function apply(ctx, initial) {
               // A typed answer to a question with an "own answer" button belongs
               // to that question, not to the session as a new instruction.
               if (await desk.text(chat.id, chat.threadId, chat.text)) return undefined
+              let text = chat.text
+              if ((text === undefined || text.length === 0) && chat.voice !== undefined) {
+                const heard = await hearVoice(ref, chat)
+                if (heard === undefined) return undefined
+                text = heard
+              }
               return await handleMessage({
-                text: chat.text,
+                text,
                 photo: chat.photo,
                 tokenRef: ref,
                 chatId: chat.id,
@@ -560,6 +667,12 @@ export function apply(ctx, initial) {
   /** Restore bindings a restart would otherwise orphan. */
   const loadThreads = () => {
     for (const row of scope?.get()?.threads ?? []) {
+      // A report topic is not a session: routing a reply into it would try to
+      // prompt a session that does not exist.
+      if (String(row.sessionId).startsWith('topic:')) {
+        specialThreads.add(`${row.chatId}:${row.threadId}`)
+        continue
+      }
       adoptThread(row.chatId, row.threadId, row.sessionId, false)
     }
   }
