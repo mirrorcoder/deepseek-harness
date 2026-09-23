@@ -10,7 +10,6 @@
 # version that has no section in CHANGELOG.md.
 set -eu
 cd "$(dirname "$0")/.."
-ROOT="$(pwd)"
 
 current="$(tr -d ' \n\r' < VERSION)"
 mode="${1:-}"
@@ -46,36 +45,9 @@ fi
 echo "→ publishing"
 ./deploy/publish.sh
 
-echo "→ building image deepseek-harness:$next"
-FORK_VERSION="$next"
-FORK_COMMIT="$(git rev-parse --short=10 HEAD)"
-BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-export FORK_VERSION FORK_COMMIT BUILD_DATE
-cd "$ROOT/deploy"
-docker compose build dsh
-docker compose up -d --remove-orphans
-i=0; while [ $i -lt 60 ]; do docker logs --since 120s dsh 2>&1 | grep -q 'token=' && break; i=$((i+1)); sleep 2; done
-docker exec dsh /opt/dsh/install-extensions.sh
-for d in skills/*/; do
-  n="$(basename "$d")"
-  docker exec dsh sh -c "[ -e /data/dsh/skills/$n/SKILL.md ]" 2>/dev/null || docker cp "$d" "dsh:/data/dsh/skills/$n"
-done
-# a clean exit lets the restart policy boot the process with the new bundles
-docker exec dsh kill -TERM 1 || true
-i=0; while [ $i -lt 60 ]; do docker logs --since 120s dsh 2>&1 | grep -q 'token=' && break; i=$((i+1)); sleep 2; done
-
-echo "→ extension tests"
-docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt; do printf "   %-24s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done'
-echo "→ running build:"
-docker exec dsh cat /opt/dsh/build-info.json
-# Each release leaves ~1 GB behind on a box that runs several other stacks.
-echo "→ reclaiming build cache and superseded images"
-# Reported, not silenced: a cleanup that fails quietly is how this box reached
-# 100% twice. `docker image rm` needs repository:tag — a bare tag is "no such
-# image", which is how the first version of this kept every old build.
-docker builder prune -af | tail -1
-for image in $(docker image ls deepseek-harness --format '{{.Repository}}:{{.Tag}}' | grep -v ":${next}$"); do
-  docker image rm "$image" >/dev/null && echo "   removed $image" || echo "   !! could not remove $image (still referenced?)"
-done
-df -h / | tail -1
-./login-link.sh
+echo "→ building and deploying v$next"
+# The deploy itself is update.sh's, from the commit just tagged: one path, with
+# its disk guard, its restart checks and the full test list. This file used to
+# carry its own copy, and the copy drifted — no disk guard, a restart wait that
+# trusted stale log lines, and seven extensions missing from its test list.
+exec ./deploy/update.sh --no-pull

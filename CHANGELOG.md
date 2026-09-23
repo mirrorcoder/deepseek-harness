@@ -12,6 +12,26 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## Unreleased
+
+Deploy scripts only; the image is unchanged.
+
+- **Fixed: a deploy could fill the disk and take down its neighbours.** On
+  2026-09-23 the v1.23.0 deploy unpacked its image into the last free bytes of
+  a shared box: the production Redis next to the harness could not save,
+  refused writes for 42 seconds, and its worker crash-looped. Every deploy was
+  a cold ~3.5 GB build, because `update.sh` wiped the whole build cache after
+  each deploy — and wiped it again before building whenever space was short.
+  Now the cache a build used is kept (only cache unused for a week goes), so
+  the next deploy costs ~50 MB; a deploy refuses to start below 2 GB free; and
+  the build runs under a disk guard that stops it — docker, the compose plugin
+  and buildx together — the moment free space falls under 1 GB
+  (`DSH_MIN_FREE_MB`). The running harness is never touched by a stopped build.
+  `deploy/test-lib.sh` covers the guard, including a Ctrl-C mid-build.
+- `release.sh` deploys through `update.sh` instead of its own drifted copy
+  (no disk guard, a restart wait that trusted stale log lines, seven
+  extensions missing from its test list).
+
 ## v1.23.1 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.
