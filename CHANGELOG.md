@@ -12,6 +12,43 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## v1.22.0 — 2026-09-23
+
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+**Runs on any Linux server with Docker, from one command.**
+
+- **`deploy/bootstrap.sh`.** From a fresh clone to a running harness:
+  `.env`, the data directory, and — with `--domain` — the bundled Caddy's
+  config with a generated password, then `update.sh` builds, starts, installs
+  the extensions, restarts, tests and prints the login link. Without `--domain`
+  the harness stays on `127.0.0.1:3080` for an SSH tunnel. It refuses before
+  changing anything when ports 80/443 are already taken, hashes the password
+  over stdin so it never appears in a process list, and is safe to run again:
+  existing values, the password and the data are kept.
+- **The compose file is portable; this machine is an override.** Everything
+  that belongs to the box this fork grew up on — the external `aisignals-edge`
+  network behind its shared Caddy — moved to `docker-compose.jusl.yml`,
+  layered on through `COMPOSE_FILE` in that box's `.env`, with `!override` so
+  the merged configuration is exactly the old one: a dry run recreated
+  nothing. The git mirror and the image-gateway bridge became compose profiles
+  instead of mandatory services, and the stack brings its own network and,
+  under the `proxy` profile, its own Caddy.
+- **No host tooling needed but Docker.** Stamping a build no longer calls node
+  on the host, and the import check runs in the build's own node image when the
+  host has none.
+- **Host access stays off.** Nothing in the one-command path mounts the host's
+  disk or installs the command gateway; `bootstrap.sh` ends by naming
+  `deploy/host-access.sh on` as a separate, deliberate step.
+- Verified on this box without touching production: an isolated copy of the
+  standalone stack, under its own project name, network and ports, came up
+  healthy, installed every extension and passed their tests; through the
+  bundled Caddy an unauthenticated request got the password challenge, a
+  wrong password was refused, and the right one plus the login link reached
+  the harness and set its cookie. `bootstrap.sh` itself was exercised on a
+  copy with the build stubbed: port refusal, local mode, domain mode (Caddy
+  validated the generated config), and a re-run keeping the password.
+
 ## v1.21.0 — 2026-09-23
 
 Upstream base: `dsh-v0.1.5-rc.3`.

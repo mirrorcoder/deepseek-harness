@@ -44,3 +44,6 @@ worktrees/
 .agents/worktrees/
 .typert-*/
 native/system/test/bin/
+
+# written by deploy/bootstrap.sh (carries the password hash)
+deploy/standalone/Caddyfile

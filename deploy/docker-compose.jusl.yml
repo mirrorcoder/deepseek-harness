@@ -1,0 +1,22 @@
+# The machine this fork grew up on: aisignals' shared Caddy already terminates
+# TLS for ds.jusl.me and reaches the harness over its external network, so
+# dsh and dsh-git join THAT network instead of the stack's own, and the
+# standalone Caddy stays off. Named by COMPOSE_FILE in this box's .env:
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.jusl.yml
+#   COMPOSE_PROFILES=git,imggw
+#
+# `!override` replaces the network lists rather than appending to them, so the
+# merged configuration is exactly what ran before this file existed and an
+# update does not recreate a single container.
+services:
+  dsh:
+    networks: !override
+      - aisignals-edge
+  dsh-git:
+    networks: !override
+      - aisignals-edge
+
+networks:
+  aisignals-edge:
+    external: true

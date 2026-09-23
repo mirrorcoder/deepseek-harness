@@ -1,16 +1,27 @@
-# DeepSeek Harness behind the box's shared Caddy (network `aisignals-edge`).
-#   dsh               — the harness Web UI, reached by Caddy as dsh:3080
-#   dsh-git           — public read-only git mirror of this fork, Caddy proxies /git/*
-#   dsh-imggw-bridge  — unix-socket bridge to the host-local Codex image gateway
-#                       (127.0.0.1:8792) so `generate_image` needs no open port
-# Host-specific values live in .env (see .env.example).
+# DeepSeek Harness — a self-contained stack that comes up on any Linux box
+# with Docker. `deploy/bootstrap.sh` writes .env and starts it.
+#
+#   dsh               — the harness, on 127.0.0.1:3080 of the host
+#   caddy             — profile `proxy`: TLS for your domain plus a password
+#                       gate in front of dsh (bootstrap.sh writes its Caddyfile)
+#   dsh-git           — profile `git`: read-only git mirror of this fork at /git/
+#   dsh-imggw-bridge  — profile `imggw`: unix-socket bridge to a host-local image
+#                       gateway, for `generate_image`
+#
+# Profiles are switched on by COMPOSE_PROFILES in .env. Anything that belongs to
+# ONE machine — an external network, a reverse proxy that already exists —
+# goes in an override file named by COMPOSE_FILE in .env, never in this one;
+# docker-compose.jusl.yml is the machine this fork grew up on.
+#
+# Host access (the machine's disk and a command gateway) is never switched on
+# here. It is a separate, deliberate step: deploy/host-access.sh on.
 services:
   dsh:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
       args:
-        DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.2}
+        DSH_VERSION: ${DSH_VERSION:-0.1.5-rc.3}
         FORK_VERSION: ${FORK_VERSION:-local}
         FORK_COMMIT: ${FORK_COMMIT:-unknown}
         BUILD_DATE: ${BUILD_DATE:-unknown}
@@ -51,37 +62,60 @@ services:
       # The host's disk, so read/edit/grep work on the machine itself. The
       # DEFAULT points at an empty directory: host access is opt-in, and
       # `deploy/host-access.sh on` is what repoints it at `/`.
-      - ${DSH_HOST_ROOT:-/root/dsh-data/no-host}:/host:rw
+      - ${DSH_HOST_ROOT:-${DSH_DATA_DIR:-/root/dsh-data}/no-host}:/host:rw
       # Socket of the host command gateway (deploy/hostd). Absent until that
       # service is installed, which is the same switch.
       - ${DSH_DATA_DIR:-/root/dsh-data}/run-host:/run/dsh-host
     ports:
       - "127.0.0.1:3080:3080"
     networks:
-      - aisignals-edge
+      - dsh-net
     logging:
       driver: json-file
       options: { max-size: "20m", max-file: "3" }
     mem_limit: ${DSH_MEM_LIMIT:-2g}
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: dsh-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./standalone/Caddyfile:/etc/caddy/Caddyfile:ro
+      # certificates and ACME account: keep them, or every restart re-issues
+      - ${DSH_DATA_DIR:-/root/dsh-data}/caddy/data:/data
+      - ${DSH_DATA_DIR:-/root/dsh-data}/caddy/config:/config
+    depends_on:
+      - dsh
+    networks:
+      - dsh-net
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "2" }
+
   dsh-git:
     image: nginx:alpine
     container_name: dsh-git
+    profiles: [git]
     restart: unless-stopped
     volumes:
       - ${DSH_GIT_DIR:-/srv/git}:/srv/git:ro
       - ./git-nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
-      - aisignals-edge
+      - dsh-net
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "2" }
 
-  # Host-network socat: exposes the loopback-only gateway as a unix socket in a
-  # shared directory. No TCP port is opened, so the firewall is untouched.
+  # Host-network socat: exposes a loopback-only image gateway as a unix socket
+  # in a shared directory. No TCP port is opened, so the firewall is untouched.
   dsh-imggw-bridge:
     image: alpine/socat
     container_name: dsh-imggw-bridge
+    profiles: [imggw]
     restart: unless-stopped
     network_mode: host
     volumes:
@@ -94,5 +128,5 @@ services:
       options: { max-size: "5m", max-file: "1" }
 
 networks:
-  aisignals-edge:
-    external: true
+  dsh-net:
+    name: ${DSH_NETWORK_NAME:-dsh-net}

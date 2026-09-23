@@ -13,11 +13,15 @@ UPSTREAM="$(git describe --tags --match 'dsh-v*' --abbrev=0 2>/dev/null || echo 
 DSH_NPM="$(sed -n 's/^DSH_VERSION=\([^ #]*\).*/\1/p' deploy/.env.example | head -1)"
 RELEASED="$(date -u +%Y-%m-%d)"
 
+# Plain sed rather than node: a fresh server that only has Docker must still be
+# able to stamp a build. Our manifests put the top-level name and version on
+# their own lines, and they come first, so the first match is the right one.
 exts=""
 for d in extensions/*/; do
-  [ -f "$d/package.json" ] || continue
-  n="$(node -p "require('./$d/package.json').name")"
-  v="$(node -p "require('./$d/package.json').version")"
+  f="${d}package.json"
+  [ -f "$f" ] || continue
+  n="$(sed -n 's/^[[:space:]]*"name":[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
+  v="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$f" | head -1)"
   exts="$exts$(printf '\n    "%s": "%s",' "$n" "$v")"
 done
 exts="${exts%,}"

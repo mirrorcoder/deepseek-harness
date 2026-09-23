@@ -12,7 +12,8 @@ fi
 # imports. A module left out of package.json "files" is not a build error and
 # not a test failure — the plugin that needs it just fails to mount after the
 # restart. That took the Telegram bridge down once (v1.21.0).
-node ./check-extensions.mjs ../extensions
+. ./lib.sh
+node_run ./check-extensions.mjs ../extensions
 # Image tag and the baked stamp both follow our own VERSION file.
 FORK_VERSION="$(tr -d ' \n\r' < ../VERSION)"
 FORK_COMMIT="$(git -C .. rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"

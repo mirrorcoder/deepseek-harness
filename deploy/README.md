@@ -1,8 +1,49 @@
 # deploy/ — running this fork of DeepSeek Harness
 
-This directory is ours (not upstream). It runs `dsh web` as a container behind
-a reverse proxy, adds our own plugins, and publishes the fork so others can
-clone it and pull updates.
+This directory is ours (not upstream). It runs `dsh web` as a container, adds
+our own plugins, and publishes the fork so others can clone it and pull
+updates.
+
+## Your own server, one command
+
+Any Linux box with Docker and the Compose plugin, about 6 GB of free disk, run
+as root:
+
+```sh
+git clone https://github.com/mirrorcoder/deepseek-harness.git && cd deepseek-harness
+
+# local only — the harness on 127.0.0.1:3080, reached through an SSH tunnel
+deploy/bootstrap.sh
+
+# or public — a domain whose A record points at this box; the bundled Caddy
+# gets the certificate and puts a password in front (ports 80/443 must be free)
+deploy/bootstrap.sh --domain dsh.example.com --email you@example.com
+```
+
+`bootstrap.sh` writes `deploy/.env`, prepares the data directory (default
+`/root/dsh-data`), renders the Caddy config and saves the password to
+`ACCESS.txt` there, then hands over to `update.sh`: build, start, install the
+extensions, restart, run their tests, print the login link. Run it again at any
+time — existing values, the password and all data are kept. After that:
+
+* the DeepSeek key: Settings → Models, or `printf '%s' 'sk-…' | deploy/model.sh key`;
+* Telegram: the ✈ button in the corner of the page;
+* updates: `deploy/update.sh` (pulls `main`, rebuilds, reinstalls, restarts).
+
+A box that already has its own reverse proxy: run without `--domain` and point
+that proxy at `127.0.0.1:3080`. A box with its own Docker network or other
+machine-specific wiring: put it in an override file and name it in `.env`,
+exactly as this fork's home machine does with `docker-compose.jusl.yml`:
+
+```sh
+COMPOSE_FILE=docker-compose.yml:docker-compose.<machine>.yml
+```
+
+**Host access is never switched on by any of this.** Mounting the host's disk
+into the container and installing the gateway that runs commands on the host
+gives the agent the whole machine as root, so it stays a separate, deliberate
+step — `deploy/host-access.sh on` — described under "Host access" below. The
+gateway is a host process and needs Node 22 on the host itself.
 
 ## Layout
 
@@ -15,7 +56,11 @@ clone it and pull updates.
 | `entrypoint.sh` | `dsh --profile web --patch … --patch … --no-open --trusted-host <public host>` |
 | `install-extensions.sh` | Runs inside the container: `dsh plugin add` for each of `../extensions/*`, materialises the `pro` agent preset, sets it as default. |
 | `skills/` | Seed skills copied into `$DSH_HOME/skills` on first update (never overwritten). |
-| `docker-compose.yml` | `dsh` (Web UI) + `dsh-git` (read-only git mirror over HTTP) + `dsh-imggw-bridge` (unix socket to the host's Codex image gateway). |
+| `docker-compose.yml` | The portable stack: `dsh` on `127.0.0.1:3080`, plus companions behind compose profiles — `caddy` (`proxy`: TLS + password), `dsh-git` (`git`: read-only mirror), `dsh-imggw-bridge` (`imggw`: image gateway socket). |
+| `docker-compose.jusl.yml` | This fork's home machine: joins the shared `aisignals-edge` network whose Caddy fronts ds.jusl.me. Layered on top via `COMPOSE_FILE` in that box's `.env`. |
+| `bootstrap.sh` | Fresh clone → running harness: `.env`, data directory, Caddy config and password, then `update.sh`. |
+| `check-extensions.mjs` | Run by `update.sh` before anything is built: every extension must ship, in package.json `files`, each module it imports. |
+| `lib.sh` | Shared helpers; `node_run` uses the host's node or, on a box without one, the build's own node image. |
 | `login-link.sh` | Prints the one-time `?token=` URL after a (re)start. |
 | `model.sh` | Configure a model without the Settings UI: `key` (stdin → `.env` → redeploy), `default <provider> <model>`, `show`. |
 | `tunnel.sh` | Prints the SSH port-forward that makes the page loopback, where the full Settings UI works. |
