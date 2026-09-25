@@ -22,9 +22,9 @@ export FORK_VERSION FORK_COMMIT BUILD_DATE
 ./gen-build-info.sh
 # Disk. The build must never fill the disk: on a shared box the neighbours pay
 # for it (see disk_guarded in lib.sh — a production Redis did, on 2026-09-23).
-# The build cache is NOT wiped before building any more: it is exactly what
-# makes the next build cheap (~50 MB instead of ~3.5 GB), and wiping it when
-# space was short forced the most expensive build at the worst moment.
+# The build cache is NOT wiped before building: when it was kept, it is what
+# makes this build cheap, and wiping it when space was short forced the most
+# expensive build at the worst moment. (Whether it is kept: see the cleanup.)
 MIN_FREE_MB="${DSH_MIN_FREE_MB:-1024}"
 FREE_MB="$(docker_free_mb)"
 if [ "$FREE_MB" -lt $((MIN_FREE_MB * 2)) ]; then
@@ -42,7 +42,7 @@ disk_guarded "$MIN_FREE_MB" docker compose build --pull dsh || BUILD_CODE=$?
 if [ "$BUILD_CODE" -eq 75 ]; then
   # Only cache goes: the stopped build's layers, and anyone else's, all rebuildable.
   docker builder prune -af >/dev/null 2>&1 || true
-  echo "!! сборка остановлена: свободного места стало меньше ${MIN_FREE_MB} МБ. Работающий dsh не тронут. Свободно теперь $(docker_free_mb) МБ; холодной сборке нужно ~3.5 ГБ" >&2
+  echo "!! сборка остановлена: свободного места стало меньше ${MIN_FREE_MB} МБ. Работающий dsh не тронут. Свободно теперь $(docker_free_mb) МБ; холодной сборке нужно ~5 ГБ" >&2
   exit 1
 fi
 [ "$BUILD_CODE" -eq 0 ] || exit "$BUILD_CODE"
@@ -98,15 +98,25 @@ docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ex
 printf "   %-26s " "runtime fetch"; docker exec dsh node --test /opt/dsh/test-runtime-fetch.mjs 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo
 echo "→ running build: $(docker exec dsh sh -c 'cat /opt/dsh/build-info.json' | tr -d "\n ")"
 
-# Every build leaves behind the tag it replaced, and cache nobody uses any more.
-# Cleaning those keeps the box from filling up one deploy at a time. The cache
-# this build just used stays: it is what the next deploy is built from.
+# Every build leaves behind the tag it replaced, and its cache. The cache is
+# what makes the next deploy cheap (tens of MB instead of a 4.7 GB cold
+# build), but with the containerd image store it holds its own copy of the
+# image: 3.2 GB here. A disk with room keeps it (only week-old cache goes); a
+# tight one cannot afford it standing next to production, and pays with a
+# cold build next time instead. DSH_KEEP_CACHE_MIN_FREE_MB moves the line.
 echo "→ уборка"
-docker builder prune -af --filter until=168h >/dev/null 2>&1 || true
 for old_tag in $(docker images --format '{{.Repository}}:{{.Tag}}' deepseek-harness 2>/dev/null | grep -v ":${FORK_VERSION}$"); do
   if docker image rm "$old_tag" >/dev/null 2>&1; then echo "   ✓ снят старый образ $old_tag"; fi
 done
 docker image prune -f >/dev/null 2>&1 || true
+KEEP_CACHE_MIN_FREE_MB="${DSH_KEEP_CACHE_MIN_FREE_MB:-8192}"
+if [ "$(docker_free_mb)" -ge "$KEEP_CACHE_MIN_FREE_MB" ]; then
+  docker builder prune -af --filter until=168h >/dev/null 2>&1 || true
+  echo "   кеш сборки оставлен: следующий деплой будет быстрым"
+else
+  docker builder prune -af >/dev/null 2>&1 || true
+  echo "   кеш сборки снят: свободно меньше $((KEEP_CACHE_MIN_FREE_MB / 1024)) ГБ, держать его рядом с продом нельзя; следующая сборка — холодная (~5 ГБ на пике)"
+fi
 df -Ph / | awk 'NR==2 {print "   диск: занято " $5 ", свободно " $4}'
 
 ./login-link.sh

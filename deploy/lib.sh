@@ -20,8 +20,9 @@ docker_free_mb() {
 # when free space falls below the floor. Returns the command's own status, or
 # 75 when it was stopped for disk.
 #
-# A cold build of this image takes ~3.5 GB at its peak, most of it in the last
-# step, when the finished image is unpacked next to its compressed layers. On
+# A cold build of this image took 4.7 GB at its peak (measured 2026-09-25),
+# much of it in the last step, when the finished image is unpacked next to its
+# compressed layers and the build cache's own copy of it. On
 # 2026-09-23 that step filled a shared box to 0 bytes: the production Redis
 # next to the harness could not save, refused writes for 42 seconds, and its
 # worker crash-looped. The harness's own container is never at risk here — it

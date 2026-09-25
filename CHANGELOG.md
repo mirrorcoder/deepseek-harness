@@ -12,6 +12,18 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
+## Unreleased
+
+Deploy scripts only; the image is unchanged.
+
+- **The build cache is kept only where the disk can afford it.** v1.24.0's
+  deploy kept it, as v1.23.x's disk fix intended, and it came to 3.2 GB — with
+  the containerd image store the cache holds its own copy of the image — on a
+  box left with 2.9 GB free next to production. It is now kept only when at
+  least 8 GB stay free after the deploy (`DSH_KEEP_CACHE_MIN_FREE_MB`), and
+  removed otherwise, at the price of a cold build next time. A cold build's
+  peak is corrected from ~3.5 GB to the measured 4.7 GB.
+
 ## v1.24.0 — 2026-09-25
 
 Upstream base: `dsh-v0.1.5-rc.3`.
