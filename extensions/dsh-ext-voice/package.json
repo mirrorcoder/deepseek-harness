@@ -1,6 +1,6 @@
 {
   "name": "dsh-ext-voice",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Speech into text on this machine: a microphone in the web composer and the service Telegram voice notes use",
   "type": "module",
   "main": "index.js",

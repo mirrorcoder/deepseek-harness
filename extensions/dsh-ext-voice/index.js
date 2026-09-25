@@ -9,6 +9,7 @@
 // The Telegram bridge uses the same service for voice notes, so there is one
 // model, one download and one queue: two surfaces asking at once wait their
 // turn instead of running two CPU-heavy transcriptions side by side.
+import { availableParallelism } from 'node:os'
 import { join } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -25,7 +26,14 @@ export default class VoiceService extends Service {
     model: z.string().default('small-q5_1'),
     /** Spoken language, or `auto`. Pinning it is faster and more accurate. */
     language: z.string().default('ru'),
-    threads: z.number().default(3),
+    /** Every core: a transcription is a short burst, and 3 of 4 cores took 6.1 s where 4 took 4.6 s. */
+    threads: z.number().default(Math.max(1, availableParallelism())),
+    /** 1 = greedy decoding. A wider beam is a little more accurate and noticeably slower on a CPU. */
+    beamSize: z.number().default(1),
+    /** Re-decode unsure segments at rising temperatures. Off: it doubled the time on hard phrases for the same text. */
+    fallback: z.boolean().default(false),
+    /** Encode a phrase of up to 13 s in a 15 s window instead of 30 s: ~40 % faster, same words in tests. */
+    shortContext: z.boolean().default(true),
     /** Longest recording accepted from the page, in seconds. */
     maxSeconds: z.number().default(300),
     /** Show the microphone in the web composer. */
@@ -69,7 +77,10 @@ export default class VoiceService extends Service {
       modelDir: join(process.env.DSH_HOME ?? '/data/dsh', 'models'),
       model: this._config.model ?? 'small-q5_1',
       language: options.language || this._config.language || 'ru',
-      threads: this._config.threads ?? 3,
+      threads: this._config.threads ?? Math.max(1, availableParallelism()),
+      beamSize: this._config.beamSize ?? 1,
+      fallback: this._config.fallback === true,
+      shortContext: this._config.shortContext !== false,
     }))
     this._queue = job.catch(() => {})
     return job

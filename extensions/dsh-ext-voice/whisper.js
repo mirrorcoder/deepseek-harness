@@ -12,7 +12,7 @@
 // injected, so the pipeline is testable without any of them.
 import { spawn } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
@@ -91,9 +91,30 @@ export function wavSeconds(bytes) {
 }
 
 /**
+ * The encoder context for a clip, in frames (50 per second; 0 = the full 30 s).
+ *
+ * Whisper encodes a full 30-second window however short the phrase, and on
+ * this CPU the encoder is ~90 % of a transcription. A 768-frame context
+ * (15.4 s) cut a 4.5 s phrase from 3.7 s to 2.2 s and an 11 s one from 4.1 s to
+ * 2.4 s, with the same words. Smaller contexts are NOT safe: at 384 and 256 the
+ * model began repeating itself ("and so my fellow Americans, and so my fellow
+ * Americans") and took longer, not shorter.
+ */
+export function audioContextFor(seconds) {
+  return typeof seconds === 'number' && seconds > 0 && seconds <= 13 ? 768 : 0
+}
+
+/**
  * Speech to text.
+ *
+ * Decoding is greedy and without temperature fallback by default. Fallback
+ * re-decodes a segment at rising temperatures whenever the model is unsure —
+ * on a phrase cut off mid-word that doubled the time (8.3 s instead of 4.2 s)
+ * for the same text. Dictation is read before it is sent, so an occasional
+ * worse word costs less than every phrase waiting twice as long.
  * @param {Buffer} audio - Ogg/Opus (a Telegram voice note) or WAV (the web microphone).
  * @param {{modelDir: string, model: string, language: string, threads: number,
+ *          beamSize?: number, fallback?: boolean, shortContext?: boolean,
  *          whisper?: string, opusdec?: string, run?: Function}} options
  */
 export async function transcribe(audio, options) {
@@ -102,22 +123,32 @@ export async function transcribe(audio, options) {
   await mkdir(work, { recursive: true })
   try {
     const wav = join(work, 'in.wav')
+    let seconds
     if (isWav(audio)) {
       await writeFile(wav, audio)
+      seconds = wavSeconds(audio)
     } else {
       const ogg = join(work, 'in.ogg')
       await writeFile(ogg, audio)
       await runner(options.opusdec ?? 'opusdec', ['--quiet', '--rate', '16000', ogg, wav], { timeoutMs: 60_000 })
+      seconds = wavSeconds(await readFile(wav).catch(() => undefined))
     }
     const model = await ensureModel(options.modelDir, options.model, options.modelDeps)
-    const { stdout } = await runner(options.whisper ?? 'whisper-cli', [
+    const beam = String(Math.max(1, Math.round(options.beamSize ?? 1)))
+    const args = [
       '-m', model,
       '-f', wav,
       '-l', options.language || 'auto',
       '-t', String(options.threads || 4),
+      '-bs', beam,
+      '-bo', beam,
       '-nt',
       '-np',
-    ], { timeoutMs: options.timeoutMs ?? 240_000 })
+    ]
+    if (options.fallback !== true) args.push('-nf')
+    const context = options.shortContext === false ? 0 : audioContextFor(seconds)
+    if (context > 0) args.push('-ac', String(context))
+    const { stdout } = await runner(options.whisper ?? 'whisper-cli', args, { timeoutMs: options.timeoutMs ?? 240_000 })
     return cleanTranscript(stdout)
   } finally {
     await rm(work, { recursive: true, force: true }).catch(() => {})

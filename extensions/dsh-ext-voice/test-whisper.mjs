@@ -2,7 +2,7 @@
 //   node --test /data/dsh/profiles/web/node_modules/dsh-ext-voice/test-whisper.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanTranscript, ensureModel, isWav, transcribe, wavSeconds } from './whisper.js'
+import { audioContextFor, cleanTranscript, ensureModel, isWav, transcribe, wavSeconds } from './whisper.js'
 
 test('silence markers are not words', () => {
   assert.equal(cleanTranscript(' [BLANK_AUDIO] '), '')
@@ -78,4 +78,44 @@ test('the header says what the bytes are and how long they last', () => {
   assert.equal(isWav(undefined), false)
   assert.equal(Math.round(wavSeconds(wav(3))), 3)
   assert.equal(wavSeconds(Buffer.from('not audio')), undefined)
+})
+
+test('a short phrase is encoded in a 15 s window, a long one in the full 30 s', () => {
+  assert.equal(audioContextFor(4.5), 768)
+  assert.equal(audioContextFor(13), 768)
+  assert.equal(audioContextFor(13.5), 0, 'a 768-frame window holds 15.4 s: no margin left past 13 s')
+  assert.equal(audioContextFor(undefined), 0, 'unknown length: the full window, never a guess')
+  assert.equal(audioContextFor(0), 0)
+})
+
+/** The arguments whisper-cli receives for `audio` under `options`. */
+async function whisperArgs(audio, options = {}) {
+  let seen
+  await transcribe(audio, {
+    modelDir: '/tmp/models', model: 'small-q5_1', language: 'ru', threads: 4, ...options,
+    modelDeps: { exists: async () => true },
+    run: async (command, args) => {
+      if (command === 'whisper-cli') seen = args
+      return { stdout: 'текст' }
+    },
+  })
+  return seen
+}
+const pair = (args, flag) => (args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined)
+
+test('dictation is decoded fast: all threads, greedy, no fallback, a short window', async () => {
+  const args = await whisperArgs(wav(5))
+  assert.equal(pair(args, '-t'), '4')
+  assert.equal(pair(args, '-bs'), '1')
+  assert.equal(pair(args, '-bo'), '1')
+  assert.ok(args.includes('-nf'), 'temperature fallback doubled the time on hard phrases')
+  assert.equal(pair(args, '-ac'), '768')
+  assert.equal(pair(await whisperArgs(wav(20)), '-ac'), undefined, 'a long recording keeps the full window')
+})
+
+test('each speed-up can be switched back off', async () => {
+  const args = await whisperArgs(wav(5), { beamSize: 5, fallback: true, shortContext: false })
+  assert.equal(pair(args, '-bs'), '5')
+  assert.ok(!args.includes('-nf'))
+  assert.ok(!args.includes('-ac'))
 })

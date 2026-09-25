@@ -12,8 +12,21 @@ semver tagged `vX.Y.Z` (upstream keeps its own `dsh-v*` tags in the same repo).
 Each release records the upstream base it was built from. `deploy/build-info.json`
 carries the same facts into the image, and `/version` prints them in the Web UI.
 
-## Unreleased
+## v1.24.0 — 2026-09-25
 
+Upstream base: `dsh-v0.1.5-rc.3`.
+
+- **Dictation about twice as fast.** On this CPU the encoder is ~90 % of a
+  transcription, and whisper encodes a full 30-second window however short the
+  phrase. Measured on a 4-core EPYC: a 4.5 s phrase went from 3.7 s to 2.2 s,
+  an 11 s one from 6.1 s (the old settings) to 2.4 s, with the same words.
+  Four changes, each a setting that can be switched back: every core instead
+  of three; greedy decoding instead of a beam of five; no temperature
+  fallback, which re-decodes a segment whenever the model is unsure and
+  doubled the time on a phrase cut off mid-word (8.3 s instead of 4.2 s, same
+  text); and a phrase of up to 13 s is encoded in a 768-frame (15.4 s) window.
+  Smaller windows are not used: at 384 and 256 frames the model began to
+  repeat itself and took longer. Telegram voice notes get the same speed-up.
 - **A Download button on every deliverable card** (`dsh-ext-files`). Upstream's
   card can only open a file on the Host's own desktop, and a harness in a
   container has none: "This Host has no desktop available to open files or
@@ -33,8 +46,8 @@ carries the same facts into the image, and `/version` prints them in the Web UI.
   of every built-in `fetch` over HTTP/2 was lost. undici 8.11.2 fixes the
   wrapper; the image now requires it (`overrides` in the runtime manifest), and
   `deploy/test-runtime-fetch.mjs` — an HTTP/2 server answering in brotli, run
-  after every deploy — fails on 8.11.0 and passes on 8.11.2. Hot-applied to the
-  running container on 2026-09-25; baked in by the next image build.
+  after every deploy — fails on 8.11.0 and passes on 8.11.2. (Hot-applied to
+  the running container first, while the disk was too full to build.)
 - **Fixed: a deploy could fill the disk and take down its neighbours.** On
   2026-09-23 the v1.23.0 deploy unpacked its image into the last free bytes of
   a shared box: the production Redis next to the harness could not save,
