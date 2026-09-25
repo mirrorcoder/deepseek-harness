@@ -93,6 +93,9 @@ i=0; while [ $i -lt 90 ]; do
 done
 echo "→ extension tests"
 docker exec dsh sh -c 'cd /data/dsh/profiles/web/node_modules && for p in dsh-ext-version dsh-ext-peak-guard dsh-ext-image-gen dsh-ext-compaction-pro dsh-ext-workspace-picker dsh-ext-remote-console dsh-ext-efficiency dsh-ext-about dsh-ext-telegram dsh-ext-toolbelt dsh-ext-host dsh-ext-memory dsh-ext-prune-pro dsh-ext-ledger dsh-ext-web-shot dsh-ext-lsp dsh-ext-voice; do printf "   %-26s " "$p"; for t in "$p"/test*.mjs; do node --test "$t"; done 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo; done' || echo "   !! тесты прогнать не удалось (контейнер перезапускается?)"
+# The runtime itself: built-in fetch through the undici the image ships (web
+# search died on this once — see test-runtime-fetch.mjs).
+printf "   %-26s " "runtime fetch"; docker exec dsh node --test /opt/dsh/test-runtime-fetch.mjs 2>&1 | grep -E "^# (pass|fail)" | tr "\n" " "; echo
 echo "→ running build: $(docker exec dsh sh -c 'cat /opt/dsh/build-info.json' | tr -d "\n ")"
 
 # Every build leaves behind the tag it replaced, and cache nobody uses any more.

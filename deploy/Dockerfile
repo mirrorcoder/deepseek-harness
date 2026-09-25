@@ -41,7 +41,14 @@ WORKDIR /opt/dsh-runtime
 # The three LSP packages (seam, stdio provider, model tool) are likewise outside
 # the closure; dsh-ext-lsp mounts them once install-extensions.sh has put them
 # into the profile.
-RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"%s","@deepseek-ai/dsh-lsp":"%s","@deepseek-ai/dsh-lsp-stdio":"%s","@deepseek-ai/dsh-tool-lsp":"%s"}}' "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" > package.json \
+#
+# undici ≥ 8.11.2, or web search breaks. Importing npm undici 8 installs its
+# Agent as the process-wide dispatcher, and Node 22's built-in fetch (undici 6)
+# then reaches it through a legacy wrapper. 8.11.0's Agent negotiates HTTP/2,
+# and over HTTP/2 that wrapper handed fetch NO response headers: DeepSeek's
+# brotli-compressed search replies were never decompressed ("Unexpected token
+# 'e'"), and every header of every built-in fetch over HTTP/2 was lost.
+RUN printf '{"name":"dsh-runtime","private":true,"dependencies":{"@deepseek-ai/dsh":"%s","@deepseek-ai/dsh-tool-session-query":"%s","@deepseek-ai/dsh-lsp":"%s","@deepseek-ai/dsh-lsp-stdio":"%s","@deepseek-ai/dsh-tool-lsp":"%s"},"overrides":{"undici":"^8.11.2"}}' "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" "${DSH_VERSION}" > package.json \
  && npm install --no-audit --no-fund
 # MCP servers switched on by deploy/features.patch.yml (stdio, launched by dsh).
 RUN npm install -g --no-audit --no-fund \
@@ -94,6 +101,7 @@ COPY deploy/features.patch.yml /opt/dsh/features.patch.yml
 COPY deploy/entrypoint.sh /opt/dsh/entrypoint.sh
 COPY deploy/install-extensions.sh /opt/dsh/install-extensions.sh
 COPY deploy/preset-pro.mjs /opt/dsh/preset-pro.mjs
+COPY deploy/test-runtime-fetch.mjs /opt/dsh/test-runtime-fetch.mjs
 # Our out-of-tree plugin bundles; installed into the profile by install-extensions.sh.
 COPY extensions/ /opt/dsh/extensions/
 RUN chmod +x /opt/dsh/entrypoint.sh /opt/dsh/install-extensions.sh \

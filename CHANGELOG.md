@@ -14,8 +14,18 @@ carries the same facts into the image, and `/version` prints them in the Web UI.
 
 ## Unreleased
 
-Deploy scripts only; the image is unchanged.
-
+- **Fixed: web search failed on every call** with "DeepSeek returned an
+  unprocessable response body: Unexpected token 'e'". Importing npm undici 8
+  (the proxy plugin does) installs its Agent as the process-wide dispatcher,
+  and Node 22's built-in `fetch` — undici 6 — then reaches it through a legacy
+  wrapper. undici 8.11.0's Agent negotiates HTTP/2, and over HTTP/2 that
+  wrapper handed `fetch` no response headers at all: DeepSeek's
+  brotli-compressed search replies were never decompressed, and every header
+  of every built-in `fetch` over HTTP/2 was lost. undici 8.11.2 fixes the
+  wrapper; the image now requires it (`overrides` in the runtime manifest), and
+  `deploy/test-runtime-fetch.mjs` — an HTTP/2 server answering in brotli, run
+  after every deploy — fails on 8.11.0 and passes on 8.11.2. Hot-applied to the
+  running container on 2026-09-25; baked in by the next image build.
 - **Fixed: a deploy could fill the disk and take down its neighbours.** On
   2026-09-23 the v1.23.0 deploy unpacked its image into the last free bytes of
   a shared box: the production Redis next to the harness could not save,
