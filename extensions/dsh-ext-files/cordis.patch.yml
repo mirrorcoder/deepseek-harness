@@ -1,0 +1,4 @@
+# Host-plane row: downloads come from the host's workspaces, for every session.
+- insert:
+    - id: ext-files
+      name: dsh-ext-files

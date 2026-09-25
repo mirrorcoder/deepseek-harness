@@ -14,6 +14,15 @@ carries the same facts into the image, and `/version` prints them in the Web UI.
 
 ## Unreleased
 
+- **A Download button on every deliverable card** (`dsh-ext-files`). Upstream's
+  card can only open a file on the Host's own desktop, and a harness in a
+  container has none: "This Host has no desktop available to open files or
+  folders". The button sits next to Open and is a plain link to
+  `GET /api/files/download?path=…`, inside the harness authentication fence:
+  one regular file from a registered workspace (or `/workspace`), streamed,
+  under its real name — a Cyrillic name arrives intact through the UTF-8
+  `filename*`. The path is resolved to its real location before the check, so
+  neither `..` nor a symlink inside a workspace reaches a file outside it.
 - **Fixed: web search failed on every call** with "DeepSeek returned an
   unprocessable response body: Unexpected token 'e'". Importing npm undici 8
   (the proxy plugin does) installs its Agent as the process-wide dispatcher,

@@ -1,0 +1,14 @@
+{
+  "name": "dsh-ext-files",
+  "version": "0.1.0",
+  "description": "Download what the agent made from the browser: a route for workspace files and a Download button on deliverable cards",
+  "type": "module",
+  "main": "index.js",
+  "license": "MIT",
+  "files": ["index.js", "download.js", "client.js", "files.browser.js", "cordis.patch.yml", "test.mjs"],
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/schemastery": "*"
+  }
+}
